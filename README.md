@@ -1,19 +1,19 @@
 # E-commerce Webshop
-####Web application for online store built with .NET 5 and Angular 11.
+#### Web application for online store built with .NET 5 and Angular 11.
 # API:
-###.NET ver:5.0.8
-##      1. API Basics:
-###1.1. Made a Skeleton API
-##2. API Architecture:
-###2.1. Repository Pattern: Added Repository(Data/ProductRepository.cs) and Interface(Data/IProductRepository.cs) classes
-###2.2. Added Repository Methods:
-####2.2.1. Added files: IProductRepository.cs, ProductRepostiory.cs
-####2.2.2. Implemented Methods:
+### .NET ver:5.0.8
+## 1. API Basics:
+### 1.1. Made a Skeleton API
+## 2. API Architecture:
+### 2.1. Repository Pattern: Added Repository(Data/ProductRepository.cs) and Interface(Data/IProductRepository.cs) classes
+### 2.2. Added Repository Methods:
+#### 2.2.1. Added files: IProductRepository.cs, ProductRepostiory.cs
+#### 2.2.2. Implemented Methods:
 ```c#
 Task<Product> GetProductByIdAsync(int id);
 Task<IReadOnlyList<Product>> GetProductsAsync();
 ```
-####2.2.3. Added Repository as a service in Startup.cs:
+#### 2.2.3. Added Repository as a service in Startup.cs:
 ```c#
  public void ConfigureServices(IServiceCollection services)
         {
@@ -26,7 +26,7 @@ Task<IReadOnlyList<Product>> GetProductsAsync();
             services.AddScoped<IProductRepository, ProductRepository>(); 
         }
 ```
-####2.2.4. Implemented constructor to ProductRepository to take readonly StoreContext _context variable as parameter
+#### 2.2.4. Implemented constructor to ProductRepository to take readonly StoreContext _context variable as parameter
 ```c#
  private readonly StoreContext _context;
 
@@ -35,7 +35,7 @@ Task<IReadOnlyList<Product>> GetProductsAsync();
             _context = context;
         }
  ```
-####2.2.5. Implemented ProductRepository methods:
+#### 2.2.5. Implemented ProductRepository methods:
 ```c#
 public async Task<Product> GetProductByIdAsync(int id)
         {
@@ -55,7 +55,7 @@ public async Task<Product> GetProductByIdAsync(int id)
         }
 
 ```
-###2.3. Extended the products entity and created related entities
+### 2.3. Extended the products entity and created related entities
 ```C#
 //BaseEntity.cs
 namespace Core.Entities
@@ -106,7 +106,7 @@ namespace Core.Entities
     }
 }
 ```
-###2.4. Create a new migration for entities
+### 2.4. Create a new migration for entities
 ```c#
 //Dropping the old database: 
 dotnet ef migrations remove -p Infrastructure -s API
@@ -115,14 +115,14 @@ dotnet ef migrations remove -p Infrastructure -s API
 //Creating new initial migration:
 dotnet ef migrations add InitialCreate -p Infrastructure -s API -o Data/Migrations
 ```
-###2.5. Configuration of the migrations
-####2.5.1. Created New Directory "Config" and added Product Configuration Class(ProductConfiguration.cs)
-####2.5.2. Derrived ProductConfiguration class from Entity Type Configuration interface: 
+### 2.5. Configuration of the migrations
+#### 2.5.1. Created New Directory "Config" and added Product Configuration Class(ProductConfiguration.cs)
+#### 2.5.2. Derrived ProductConfiguration class from Entity Type Configuration interface: 
 ```c#
 //Data/Config/ProductConfiguration.cs
 public class ProductRepository:IProductRepository{}
 ```
-####2.5.3. Implemented Configuration Method:
+#### 2.5.3. Implemented Configuration Method:
 ```c#
 //..Data/Config/ProductConfiguration.cs
 public void Configure(EntityTypeBuilder<Product> builder)
@@ -145,7 +145,7 @@ protected override void OnModelCreating(ModelBuilder modelBuilder)
         }
 
 ```
-###2.6. Configuring Startup.cs to Create the database if missing and sync with migrations on app startup:
+### 2.6. Configuring Startup.cs to Create the database if missing and sync with migrations on app startup:
 ```c#
 //..API/Program.cs
 public static async Task Main(string[] args)
@@ -172,9 +172,9 @@ public static async Task Main(string[] args)
 
 
 ```
-###2.7. Added Seed Data from files:
-####2.7.1. Created new directory `Data/SeedData` with and added files ``brands.json`` `types.json` & `products.json`
-####2.7.2. Added New Class `Data/StoreContextSeed.cs`
+### 2.7. Added Seed Data from files:
+#### 2.7.1. Created new directory `Data/SeedData` with and added files ``brands.json`` `types.json` & `products.json`
+#### 2.7.2. Added New Class `Data/StoreContextSeed.cs`
 ```c#
 //..Data/StoreContext.cs
 using System;
@@ -235,7 +235,7 @@ namespace Infrastructure.Data
     }
 }
 ```
-####2.7.3. Updated Program.cs
+#### 2.7.3. Updated Program.cs
 ```c#
  try
 {
@@ -245,15 +245,15 @@ await context.Database.MigrateAsync();
 await StoreContextSeed.SeedAsync(context,loggerFactory);
 }
 ```
-###2.8. Added code to get product brands and types along with Product object
-####2.8.1. Updated `IProductRepository.cs`
+### 2.8. Added code to get product brands and types along with Product object
+#### 2.8.1. Updated `IProductRepository.cs`
 ```c#
 //..Core/Interfaces/IProductRepository.cs
 //Added following methods:
 Task<IReadOnlyList<ProductBrand>> GetProductsBrandsAsync();
 Task<IReadOnlyList<ProductType>> GetProductsTypesAsync();
 ```
-####2.8.2.Implemented methods in `ProductRepository.cs`
+#### 2.8.2.Implemented methods in `ProductRepository.cs`
 ```c#
 public async Task<IReadOnlyList<ProductBrand>> GetProductsBrandsAsync()
         {
@@ -265,7 +265,7 @@ public async Task<IReadOnlyList<ProductType>> GetProductsTypesAsync()
             return await _context.ProductTypes.ToListAsync();
         }
 ```
-####2.8.3. Updated `ProductController.cs`
+#### 2.8.3. Updated `ProductController.cs`
 ```c#
 //..API/Controllers/ProductController.cs
  [HttpGet("brands")]
@@ -280,7 +280,7 @@ public async Task<IReadOnlyList<ProductType>> GetProductsTypesAsync()
         }
 ```
 
-###2.9. Added Eager Loading to navigation properties
+### 2.9. Added Eager Loading to navigation properties
 ```c#
 // ..Infrastructure/ProductRepository.cs
 public async Task<Product> GetProductByIdAsync(int id)
@@ -301,5 +301,5 @@ public async Task<IReadOnlyList<Product>> GetProductsAsync()
                 .ToListAsync();
         }
 ```
-###2.10. Updated `README.md`
+### 2.10. Updated `README.md`
 
