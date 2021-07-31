@@ -12,8 +12,6 @@ namespace Core.Entities
         public int ProductTypeId { get; set; }
         public ProductBrand ProductBrand { get; set; }
         public int ProductBrandId { get; set; }
-        
-        
-        
+
     }
 }
