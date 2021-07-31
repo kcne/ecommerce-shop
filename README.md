@@ -1,9 +1,17 @@
-# E-commerce Webshop
-#### Web application for online store built with .NET 5 and Angular 11.
+# Development Procces Tracker:
+#### Online store web application as a part of a web development course. To track progress I embedded all of the development process(code edits, file creation, design pattern implementation etc.) in this file  so in the end I will have whole development procces documented.
+### Stack: .NET 5.0, Angular 11 and SQLite.
+### Enviroment: Windows 10
+### Date Created: 30.7.2021.
+### Last Edit: 31.7.2021
+### Contributors: Emin Kocan
 # API:
-### .NET ver:5.0.8
 ## 1. API Basics:
 ### 1.1. Made a Skeleton API
+##Created project and structured it so it is split in  3 parts:
+ - API: Main project in which we store controllers, `Program.cs` , `Startup.cs` & configuration files.
+ - Core: A place where we will store our `Entities` & `Interfaces`.
+ - Infrastructure: This is where all data related parts of application like Entity Framework configuration files, migrations, .json data files, and other classes like Repository & Data Context classes will be stored.
 ## 2. API Architecture:
 ### 2.1. Repository Pattern: Added Repository(Data/ProductRepository.cs) and Interface(Data/IProductRepository.cs) classes
 ### 2.2. Added Repository Methods:
@@ -303,8 +311,8 @@ public async Task<IReadOnlyList<Product>> GetProductsAsync()
 ```
 ### 2.10. Updated `README.md`
 ## 3. API Generic Repository
-####In this part i will cover:
-####- Creating a generic repository
+#### In this part i will cover:
+#### - Creating a generic repository
 #### - Specification pattern
 #### - Using the specification pattern
 #### - Shape data
