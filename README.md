@@ -302,4 +302,122 @@ public async Task<IReadOnlyList<Product>> GetProductsAsync()
         }
 ```
 ### 2.10. Updated `README.md`
+## 3. API Generic Repository
+####In this part i will cover:
+####- Creating a generic repository
+#### - Specification pattern
+#### - Using the specification pattern
+#### - Shape data
+#### - AutoMapper
+#### - Serving static content from API
+### 3.1. Creating a Generic repository and interface
+#### Created new class in interfaces folder called IGenericRepository
+```c#
+//../Interfaces/IGenericRepository.cs
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Core.Entities;
 
+namespace Core.Interfaces
+{
+    public interface IGenericRepository<T> where T : BaseEntity
+    {
+        Task<T> GetByIdAsync(int id);
+        Task<IReadOnlyList<T>> ListAllAsync();
+    }
+}
+```
+#### Created `GenericRepository.cs` class in `Infrastructure/Data` folder
+### 3.2. Implementing methods in Generic Repository
+#### Updated `ConfigureServices` method in `Startup.cs`
+```c#
+public void ConfigureServices(IServiceCollection services)
+        {
+            services.AddScoped<IProductRepository, ProductRepository>();
+//---------------------------------------------------------------------------------------------
+            services.AddScoped(typeof(IGenericRepository<>), (typeof(GenericRepository<>)));
+//---------------------------------------------------------------------------------------------
+            services.AddControllers();
+            services.AddDbContext<StoreContext>(x =>
+                x.UseSqlite(_config.GetConnectionString("DefaultConnection")));
+                
+        }
+```
+#### Updated `GenericRepository.cs`
+```c#
+//..Infrastructure/Data/GenericRepository.cs
+namespace Infrastructure.Data
+{
+    public class GenericRepository<T>:IGenericRepository<T> where T : BaseEntity
+    {
+        private readonly StoreContext _context;
+
+        public GenericRepository(StoreContext context)
+        {
+            _context = context;
+        }
+
+        public async Task<T> GetByIdAsync(int id)
+        {
+            return await _context.Set<T>().FindAsync(id);
+        }
+
+        public async Task<IReadOnlyList<T>> ListAllAsync()
+        {
+            return await _context.Set<T>().ToListAsync();
+        }
+    }
+}
+```
+#### Updated `ProductController.cs`
+```c#
+//..API/Startup.cs
+namespace API.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class ProductsController : ControllerBase
+    {
+        private readonly IGenericRepository<Product> _productsRepo;
+        private readonly IGenericRepository<ProductBrand> _productBrandRepo;
+        private readonly IGenericRepository<ProductType> _productTypeRepo;
+
+        public ProductsController(IGenericRepository<Product> productsRepo,
+            IGenericRepository<ProductBrand> productBrandRepo, IGenericRepository<ProductType> productTypeRepo)
+        {
+            _productsRepo = productsRepo;
+            _productBrandRepo = productBrandRepo;
+            _productTypeRepo = productTypeRepo;
+        }
+        [HttpGet]
+        public async Task<ActionResult<List<Product>>> GetProducts()
+        {
+            var products = await _productsRepo.ListAllAsync();
+            return Ok(products);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<List<Product>>> GetProduct(int id)
+        {
+            return Ok(await _productsRepo.GetByIdAsync(id));
+        }
+
+        [HttpGet("brands")]
+        public async Task<ActionResult<IReadOnlyList<ProductBrand>>> GetProductBrands()
+        {
+            return Ok(await _productBrandRepo.ListAllAsync());
+        }
+        [HttpGet("types")]
+        public async Task<ActionResult<IReadOnlyList<ProductType>>> GetProductTypes()
+        {
+            return Ok(await _productTypeRepo.ListAllAsync());
+        }
+    }
+}
+```
+### 3.3. Specification Pattern:
+##### Whats the use:
+##### - Describes a query in an object
+##### - Returns an IQueryable<T>
+##### - Generic List method takes specification as parameter
+##### - Specification can have meaningful name
