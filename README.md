@@ -1,5 +1,6 @@
 # Development Procces Tracker:
-#### Online store web application as a part of a web development course. To track progress I embedded all of the development process(code edits, file creation, design pattern implementation etc.) in this file  so in the end I will have whole development procces documented.
+#### Online store web application as a part of a web development course. 
+To track progress I embedded all of the development process(code edits, file creation, design pattern implementation etc.) in this file  so in the end I will have whole development procces documented.
 ### Stack: .NET 5.0, Angular 11 and SQLite.
 ### Enviroment: Windows 10
 ### Date Created: 30.7.2021.
