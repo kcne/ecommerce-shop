@@ -4,7 +4,7 @@ To track progress I embedded all of the development process(code edits, file cre
 ### Stack: .NET 5.0, Angular 11 and SQLite.
 ### Enviroment: Windows 10
 ### Date Created: 30.7.2021.
-### Last Edit: 31.7.2021
+### Last Edit: 32.7.2021 00:15:
 ### Contributors: Emin Kocan
 # API:
 ## 1. API Basics:
@@ -555,3 +555,263 @@ public async Task<ActionResult<List<Product>>> GetProducts()
             return Ok(products);
         }
 ```
+### 3.6. Using specific methods in controller
+ 1. Overload a constructor in `BaseSpecification.cs` to take `criteria` as a paremeter:
+```c#
+public BaseSpecification(Expression<Func<T, bool>> criteria)
+{
+    Criteria = criteria;
+}
+```
+2. Overload ProductsWithTypesAndBrandsSpecification class constructor:
+```c#
+public ProductsWithTypesAndBrandsSpecification(int id) : base(x=>x.Id==id)
+{
+    AddInclude(x => x.ProductType);
+    AddInclude(x => x.ProductBrand);
+}
+```
+3. Edited `GetProduct(int id)` in `ProductsController.cs` so it makes use of specification pattern:
+```c#
+public async Task<ActionResult<List<Product>>> GetProduct(int id)
+{
+    var spec = new ProductsWithTypesAndBrandsSpecification(id);
+    return Ok(await _productsRepo.GetEntityWithSpec(spec));
+}
+```
+### 3.6. Shaping the data to return with DTO(Data Transfer Object)
+ 1. Create dir `Dtos` in `API`
+ 2. Create a class `ProductToReturnDto.cs` in `Dtos`
+```c#
+namespace API.Dtos
+{
+    public class ProductToReturnDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; }
+        public string Description { get; set; }
+        public decimal Price { get; set; }
+        public string PictureUrl { get; set; }
+        public string ProductType { get; set; }
+        public string ProductBrand { get; set; }
+    }
+}
+```
+3. Reformat `ProductsController.cs`
+```c#
+public async Task<ActionResult<List<ProductToReturnDto>>> GetProducts()
+{
+    // Create specification using ProductWithTypesAndBrandsSpec
+    var spec = new ProductsWithTypesAndBrandsSpecification();
+    // Use spec variable as argument in .ListAsync method
+    var products = await _productsRepo.ListAsync(spec);
+    return products.Select(product => new ProductToReturnDto
+        {
+            Id = product.Id,
+            Name = product.Name,
+            Description = product.Description,
+            PictureUrl = product.PictureUrl,
+            Price = product.Price,
+            ProductBrand = product.ProductBrand.Name,
+            ProductType = product.ProductType.Name
+        }).ToList();
+    }
+```
+```c#
+public async Task<ActionResult<ProductToReturnDto>> GetProduct(int id)
+{
+    var spec = new ProductsWithTypesAndBrandsSpecification(id);
+    var product = await _productsRepo.GetEntityWithSpec(spec);
+    return new ProductToReturnDto
+        {
+            Id = product.Id,
+            Name = product.Name,
+            Description = product.Description,
+            PictureUrl = product.PictureUrl,
+            Price = product.Price,
+            ProductBrand = product.ProductBrand.Name,
+            ProductType = product.ProductType.Name
+        };
+}
+```
+### 3.6.1. Adding AutoMapper to the project
+ 1. Install `AutoMapper.Extensions.Microsoft.DependencyInjection` NuGet package.
+ 2. Create a Helpers folder in `API` directory.
+ 3. In `Helpers` folder create `MappingProfiles.cs` file
+```c#
+using API.Dtos;
+using AutoMapper;
+using Core.Entities;
+
+namespace API.Helpers
+{
+    public class MappingProfiles:Profile
+    {
+        public MappingProfiles()
+        {
+            CreateMap<Product, ProductToReturnDto>();
+        }
+    }
+}
+```
+ 4. Add AutoMapper as a service in `Startup.cs`
+```c#
+services.AddAutoMapper(typeof(MappingProfiles));
+```
+ 5. Add `IMapper` to `ProductsController` constructor:
+```c#
+public ProductsController(IGenericRepository<Product> productsRepo,
+    IGenericRepository<ProductBrand> productBrandRepo, IGenericRepository<ProductType> productTypeRepo, IMapper mapper)
+{
+    _productsRepo = productsRepo;
+    _productBrandRepo = productBrandRepo;
+    _productTypeRepo = productTypeRepo;
+    _mapper = mapper;
+}
+```
+ 6. Refactor `GetProduct(int id)` & `GetProducts()` methods in Products Controller
+```c#
+public async Task<ActionResult<ProductToReturnDto>> GetProduct(int id)
+{
+    var spec = new ProductsWithTypesAndBrandsSpecification(id);
+    var product = await _productsRepo.GetEntityWithSpec(spec);
+    return _mapper.Map<Product, ProductToReturnDto>(product);
+}
+```
+ 7. Result after calling the method from the url `https://localhost:5001/api/products/2`:
+```json
+{
+  "id": 2,
+  "name": "Core Purple Boots",
+  "description": "Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Proin pharetra nonummy pede. Mauris et orci.",
+  "price": 199.99,
+  "pictureUrl": "images/products/boot-core1.png",
+  "productType": "Core.Entities.ProductType",
+  "productBrand": "Core.Entities.ProductBrand"
+}
+```
+Note we can't see the ProductType and productBrand properties. 
+### 3.6.2. Configuring AutoMapper profile
+1. Refactor code in `MappingProfiles.cs` constructor
+```c#
+public MappingProfiles()
+{
+    CreateMap<Product, ProductToReturnDto>()
+        .ForMember(d => d.ProductBrand, o => o.MapFrom(s => s.ProductBrand.Name))
+        .ForMember(d => d.ProductType, o => o.MapFrom(s => s.ProductType.Name));
+    
+}
+```
+This time after sending an HTTP request we get:
+```json
+{
+    "id": 2,
+    "name": "Core Purple Boots",
+    "description": "Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Proin pharetra nonummy pede. Mauris et orci.",
+    "price": 199.99,
+    "pictureUrl": "images/products/boot-core1.png",
+    "productType": "Boots",
+    "productBrand": "NetCore"
+}
+```
+2. Refactor `GetProducts()` in `ProductsController.cs`:
+```c#
+public async Task<ActionResult<IReadOnlyList<ProductToReturnDto>>> GetProducts()
+{
+    // Create specification using ProductWithTypesAndBrandsSpec
+    var spec = new ProductsWithTypesAndBrandsSpecification();
+    // Use spec variable as argument in .ListAsync method
+    var products = await _productsRepo.ListAsync(spec);
+    //this time using auto maper to return list of productDto objects
+    return Ok(_mapper.Map<IReadOnlyList<Product>, IReadOnlyList<ProductToReturnDto>>(products));
+}
+```
+After the HTTP request to https://localhost:5001/api/products/ we get:
+```json
+[
+    {
+        "id": 1,
+        "name": "Typescript Entry Board",
+        "description": "Aenean nec lorem. In porttitor. Donec laoreet nonummy augue.",
+        "price": 120,
+        "pictureUrl": "images/products/sb-ts1.png",
+        "productType": "Boards",
+        "productBrand": "Typescript"
+    },
+    {
+        "id": 2,
+        "name": "Core Purple Boots",
+        "description": "Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. Proin pharetra nonummy pede. Mauris et orci.",
+        "price": 199.99,
+        "pictureUrl": "images/products/boot-core1.png",
+        "productType": "Boots",
+        "productBrand": "NetCore"
+    },
+    {
+        "id": 3,
+        "name": "Core Red Boots",
+        "description": "Lorem ipsum dolor sit amet, consectetuer adipiscing elit. Maecenas porttitor congue massa. Fusce posuere, magna sed pulvinar ultricies, purus lectus malesuada libero, sit amet commodo magna eros quis urna.",
+        "price": 189.99,
+        "pictureUrl": "images/products/boot-core2.png",
+        "productType": "Boots",
+        "productBrand": "NetCore"
+    }
+]
+```
+### 3.6.3. Adding a Custom Value Resolver for AutoMapper
+ 1. Add ```"ApiUrl": "https://localhost:5001/"```  in `appsettings.Development.json`
+ 2. Create `ProductUrlResolver.cs` class in `Helpers`
+```c#
+using API.Dtos;
+using AutoMapper;
+using Core.Entities;
+using Microsoft.Extensions.Configuration;
+
+namespace API.Helpers
+{
+    public class ProductUrlResolver:IValueResolver<Product,ProductToReturnDto,string>
+    {
+        private readonly IConfiguration _config;
+
+        public ProductUrlResolver(IConfiguration config)
+        {
+            _config = config;
+        }
+
+        public string Resolve(Product source, ProductToReturnDto destination, string destMember, ResolutionContext context)
+        {
+            if (!string.IsNullOrEmpty(source.PictureUrl))
+            {
+                return _config["ApiUrl"] + source.PictureUrl;
+            }
+
+            return null;
+        }
+    }
+}
+```
+2. Edit `MappingProfiles.cs` constructor:
+```c#
+        public MappingProfiles()
+        {
+            CreateMap<Product, ProductToReturnDto>()
+                .ForMember(d => d.ProductBrand, o => o.MapFrom(s => s.ProductBrand.Name))
+                .ForMember(d => d.ProductType, o => o.MapFrom(s => s.ProductType.Name))
+                //add ProductUrlResolver to the mapper
+                .ForMember(d => d.PictureUrl, o => o.MapFrom<ProductUrlResolver>());
+        }
+    }
+```
+### 3.6.4. Serving static content from the API
+ 1. Create new folder `wwwroot` in `API` directory
+ 2. Copy `images` folder to `wwwroot` directory
+ 3. In `Startup.cs` class inside `Configure(IApplicationBuilder app, IWebHostEnviroment env)` method add following line:
+```c#
+            app.UseRouting();
+//----------------------------------------
+            app.UseStaticFiles();
+//----------------------------------------         
+            app.UseAuthorization();
+```
+ Now we can show images from directly by clicking on the url from json object. 
+    
