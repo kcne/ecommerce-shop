@@ -430,3 +430,128 @@ namespace API.Controllers
 ##### - Returns an IQueryable<T>
 ##### - Generic List method takes specification as parameter
 ##### - Specification can have meaningful name
+### 3.3.1. Creating a Specification Evaluator
+ 1. Create new `Specifications` directory in `Core` project
+ 2. Create new `ISpecification.cs` interface in `Specifications` dir
+ ```c#
+ //..Specifications/ISpecification.cs
+ using System;
+using System.Collections.Generic;
+using System.Linq.Expressions;
+
+namespace API.Specifications
+{
+    public interface ISpecification<T>
+    {
+        Expression<Func<T, bool>> Criteria { get; }
+        List<Expression<Func<T, object>>> Includes { get; }
+    }
+}
+ ```
+ 3. Create a new class `BaseSpecification.cs` in `Specifications`
+```c#
+ //..Specifications/BaseSpecification.cs
+using System;
+using System.Collections.Generic;
+using System.Linq.Expressions;
+
+namespace API.Specifications
+{
+    public class BaseSpecification<T> : ISpecification<T>
+    {
+        public BaseSpecification(Expression<Func<T, bool>> criteria)
+        {
+            Criteria = criteria;
+        }
+
+        public Expression<Func<T, bool>> Criteria { get; }
+        public List<Expression<Func<T, object>>> Includes { get; } = new List<Expression<Func<T, object>>>();
+
+        protected void AddInclude(Expression<Func<T, object>> includeExpression)
+        {
+            Includes.Add(includeExpression);
+        }
+    }
+}
+```
+4. In `Data` create a new c# class `SpecificationEvaluator.cs`
+```c#
+//..Infrastructure/Data/SpecificationEvaluator.cs
+using System.Linq;
+using API.Specifications;
+using Core.Entities;
+using Microsoft.EntityFrameworkCore;
+
+
+namespace Infrastructure.Data
+{
+    public class SpecificationEvaluator<TEntity> where TEntity : BaseEntity
+    {
+        public static IQueryable<TEntity> GetQuery(IQueryable<TEntity> inputQuery, ISpecification<TEntity> spec)
+        {
+            var query = inputQuery;
+            if (spec.Criteria != null)
+            {
+                query = query.Where(spec.Criteria);
+            }
+
+            query = spec.Includes.Aggregate(query, (current, include) => current.Include(include));
+            return query;
+        }
+    }
+}
+```
+ 5. Added following methods in `IGenericRepository.cs`
+```c#
+Task<T> GetEntityWithSpec(ISpecification<T> spec);
+Task<IReadOnlyList<T>> ListAsync(ISpecification<T> spec);
+```
+### 3.4. Implementing the repository with specification methods
+Added following methods in `GenericRepository.cs`
+```c#
+public async Task<T> GetEntityWithSpec(ISpecification<T> spec)
+        {
+            return await ApplySpecification(spec).FirstOrDefaultAsync();
+        }
+
+public async Task<IReadOnlyList<T>> ListAsync(ISpecification<T> spec)
+        {
+            return await ApplySpecification(spec).ToListAsync();
+        }
+
+private IQueryable<T> ApplySpecification(ISpecification<T> spec)
+        {
+            return SpecificationEvaluator<T>.GetQuery(_context.Set<T>().AsQueryable(), spec);
+        }
+```
+### 3.5. Using the specification methods in controller
+ 1. Generate an empty constructor in `BaseSpecification.cs`
+ 2. Create `ProductsWithTypesAndBrandsSpecification.cs` in `Specifications`
+```c#
+using Core.Entities;
+
+namespace API.Specifications
+{
+    public class ProductsWithTypesAndBrandsSpecification : BaseSpecification<Product>
+    {
+        public ProductsWithTypesAndBrandsSpecification()
+        {
+            AddInclude(x => x.ProductType);
+            AddInclude(x => x.ProductBrand);
+        }
+    }
+}
+```
+3. Edit `GetProducts()` method to now show include ProductType and ProductBrand properties along with Product objects.
+```c#
+// This is where we return product list but until this change Product object would be returned without productType and productBrand properties.
+// In order to do so, instead of using var products = await _productsRepo.ListAllAsync(); code was refactored to following:
+public async Task<ActionResult<List<Product>>> GetProducts()
+        {
+            // Create specification using ProductWithTypesAndBrandsSpec
+            var spec = new ProductsWithTypesAndBrandsSpecification();
+            // Use spec variable as argument in .ListAsync method
+            var products = await _productsRepo.ListAsync(spec);
+            return Ok(products);
+        }
+```
