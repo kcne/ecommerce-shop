@@ -1,29 +1,31 @@
-# Development Procces Tracker:
-#### Online store web application as a part of a web development course. 
-To track progress I embedded all of the development process(code edits, file creation, design pattern implementation etc.) in this file  so in the end I will have whole development procces documented.
+## Project Development Procces Tracker:
+#### Project: Online store web application as a part of a web development course. 
+Goal: To track progress I embedded all of the development process(code edits, file creation, design pattern implementation etc.) in this file  so in the end I will have whole development procces documented.
 ### Stack: .NET 5.0, Angular 11 and SQLite.
 ### Enviroment: Windows 10
 ### Date Created: 30.7.2021.
-### Last Edit: 32.7.2021 00:15:
+### Last Edit: 2.8.2021 00:15:
 ### Contributors: Emin Kocan
 # API:
 ## 1. API Basics:
 ### 1.1. Made a Skeleton API
-##Created project and structured it so it is split in  3 parts:
+### Created project and structured it so it is split in  3 parts:
  - API: Main project in which we store controllers, `Program.cs` , `Startup.cs` & configuration files.
  - Core: A place where we will store our `Entities` & `Interfaces`.
  - Infrastructure: This is where all data related parts of application like Entity Framework configuration files, migrations, .json data files, and other classes like Repository & Data Context classes will be stored.
 ## 2. API Architecture:
-### 2.1. Repository Pattern: Added Repository(Data/ProductRepository.cs) and Interface(Data/IProductRepository.cs) classes
+### 2.1. Repository Pattern:
 ### 2.2. Added Repository Methods:
-#### 2.2.1. Added files: IProductRepository.cs, ProductRepostiory.cs
-#### 2.2.2. Implemented Methods:
+ 1. Added classes: `IProductRepository.cs` in `Interfaces`, `ProductRepository.cs` in `Data`
+ 2. Declared following methods in `IProductRepository.cs`:
 ```c#
+//..Interfaces/IProductRepository.cs
 Task<Product> GetProductByIdAsync(int id);
 Task<IReadOnlyList<Product>> GetProductsAsync();
 ```
-#### 2.2.3. Added Repository as a service in Startup.cs:
+ 3. Added ProductRepository as a service in `Startup.cs`:
 ```c#
+//..API/Startup.cs
  public void ConfigureServices(IServiceCollection services)
         {
             services.AddControllers();
@@ -35,7 +37,7 @@ Task<IReadOnlyList<Product>> GetProductsAsync();
             services.AddScoped<IProductRepository, ProductRepository>(); 
         }
 ```
-#### 2.2.4. Implemented constructor to ProductRepository to take readonly StoreContext _context variable as parameter
+ 4. Create a constructor `ProductRepository(Storecontext context)` to take readonly StoreContext variable on initial creation:
 ```c#
  private readonly StoreContext _context;
 
@@ -44,25 +46,19 @@ Task<IReadOnlyList<Product>> GetProductsAsync();
             _context = context;
         }
  ```
-#### 2.2.5. Implemented ProductRepository methods:
+ 5. Implemented following ProductRepository methods:
 ```c#
 public async Task<Product> GetProductByIdAsync(int id)
         {
-        //Commented out code added later due to later documentation
             return await _context.Products
-                //.Include(p => p.ProductType)
-                //.Include(p => p.ProductBrand)
                 .FirstOrDefaultAsync(p => p.Id == id);
         }
 
         public async Task<IReadOnlyList<Product>> GetProductsAsync()
         {
             return await _context.Products
-                //.Include(p=>p.ProductType)
-                //.Include(p=>p.ProductBrand)
                 .ToListAsync();
         }
-
 ```
 ### 2.3. Extended the products entity and created related entities
 ```C#
@@ -115,7 +111,7 @@ namespace Core.Entities
     }
 }
 ```
-### 2.4. Create a new migration for entities
+### 2.4. Creating a new migration for the entities:
 ```c#
 //Dropping the old database: 
 dotnet ef migrations remove -p Infrastructure -s API
@@ -124,14 +120,14 @@ dotnet ef migrations remove -p Infrastructure -s API
 //Creating new initial migration:
 dotnet ef migrations add InitialCreate -p Infrastructure -s API -o Data/Migrations
 ```
-### 2.5. Configuration of the migrations
-#### 2.5.1. Created New Directory "Config" and added Product Configuration Class(ProductConfiguration.cs)
-#### 2.5.2. Derrived ProductConfiguration class from Entity Type Configuration interface: 
+### 2.5. Configuring migrations
+ 1. Created new directory `Config` and added `ProductConfiguration.cs` class
+ 2. Derived `ProductConfiguration` class from `IEntityTypeConfiguration<>` interface 
 ```c#
 //Data/Config/ProductConfiguration.cs
-public class ProductRepository:IProductRepository{}
+public class ProductConfiguration:IEntityTypeConfiguration<Product>
 ```
-#### 2.5.3. Implemented Configuration Method:
+ 3. Implemented `Configure` method:
 ```c#
 //..Data/Config/ProductConfiguration.cs
 public void Configure(EntityTypeBuilder<Product> builder)
@@ -178,12 +174,10 @@ public static async Task Main(string[] args)
             }
             host.Run();
         }
-
-
 ```
 ### 2.7. Added Seed Data from files:
-#### 2.7.1. Created new directory `Data/SeedData` with and added files ``brands.json`` `types.json` & `products.json`
-#### 2.7.2. Added New Class `Data/StoreContextSeed.cs`
+#### 1. Created new directory `Data/SeedData` with and added files ``brands.json`` `types.json` & `products.json`
+#### 2. Added New Class `Data/StoreContextSeed.cs`
 ```c#
 //..Data/StoreContext.cs
 using System;
@@ -244,7 +238,7 @@ namespace Infrastructure.Data
     }
 }
 ```
-#### 2.7.3. Updated Program.cs
+#### 3. Updated `Program.cs`
 ```c#
  try
 {
@@ -254,15 +248,15 @@ await context.Database.MigrateAsync();
 await StoreContextSeed.SeedAsync(context,loggerFactory);
 }
 ```
-### 2.8. Added code to get product brands and types along with Product object
-#### 2.8.1. Updated `IProductRepository.cs`
+### 2.8. Refactoring code to get product brands and types along with Product object
+#### 1. Updated `IProductRepository.cs`
 ```c#
 //..Core/Interfaces/IProductRepository.cs
 //Added following methods:
 Task<IReadOnlyList<ProductBrand>> GetProductsBrandsAsync();
 Task<IReadOnlyList<ProductType>> GetProductsTypesAsync();
 ```
-#### 2.8.2.Implemented methods in `ProductRepository.cs`
+#### 2. Implemented methods in `ProductRepository.cs`
 ```c#
 public async Task<IReadOnlyList<ProductBrand>> GetProductsBrandsAsync()
         {
@@ -274,7 +268,7 @@ public async Task<IReadOnlyList<ProductType>> GetProductsTypesAsync()
             return await _context.ProductTypes.ToListAsync();
         }
 ```
-#### 2.8.3. Updated `ProductController.cs`
+#### 3. Updated `ProductController.cs`
 ```c#
 //..API/Controllers/ProductController.cs
  [HttpGet("brands")]
@@ -813,5 +807,315 @@ namespace API.Helpers
 //----------------------------------------         
             app.UseAuthorization();
 ```
- Now we can show images from directly by clicking on the url from json object. 
-    
+ Now we can show images from directly by clicking on the url from json object.
+## 4. API Error Handling
+### 4.1. Creating test controller for errors
+ 1. Create `BaseApiController.cs` class in `Controllers`
+```c#
+using Microsoft.AspNetCore.Mvc;
+
+namespace API.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class BaseApiController:ControllerBase
+    {
+    }
+}
+```
+ 2. Create new `BuggyController.cs` controller in `Controllers`
+```c#
+using Infrastructure.Data;
+using Microsoft.AspNetCore.Mvc;
+
+namespace API.Controllers
+{
+    public class BuggyController : BaseApiController
+    {
+        private readonly StoreContext _context;
+
+        public BuggyController(StoreContext context)
+        {
+            _context = context;
+        }
+
+        [HttpGet("notfound")]
+        public ActionResult GetNotFoundRequest()
+        {
+            var thing = _context.Products.Find(42);
+            if (thing == null)
+            {
+                return NotFound();
+            }
+            return Ok();
+        }
+
+        [HttpGet("servererror")]
+        public ActionResult GetServerError()
+        {
+            var thing = _context.Products.Find(42);
+            var thingToReturn = thing.ToString();
+            return Ok();
+        }
+
+        [HttpGet("badrequest")]
+        public ActionResult GetBadRequest()
+        {
+            return BadRequest();
+        }
+
+        [HttpGet("badrequest/{id}")]
+        public ActionResult GetNotFoundRequest(int id)
+        {
+            return Ok();
+        }
+    }
+}
+```
+### 4.1. Create a consistent error response from the API
+ 1. Inside `API` create folder `Errors`
+ 2. In `Errors` folder create a new class `ApiResponse`
+```c#
+namespace API.Errors
+{
+    public class ApiResponse
+    {
+        public ApiResponse(int statusCode, string message=null)
+        {
+            StatusCode = statusCode;
+            Message = message ?? GetDefaultMessageForStatusCode(statusCode);
+        }
+        public int StatusCode { get; set; }
+        public string Message { get; set; }
+        private string GetDefaultMessageForStatusCode(int statusCode)
+        {
+            return statusCode switch
+            {
+                400 => "You have made a bad request",
+                401 => "You are not authorized",
+                404 => "Resource not found",
+                500 => "Server Error",
+                _ => null
+            };
+        }
+    }
+}
+```
+3. Include ApiResponse class inside return statements in `BuggyController.cs` class
+```c#
+[HttpGet("badrequest")]
+        public ActionResult GetBadRequest()
+        {
+            return BadRequest(new ApiResponse(400));
+        }
+```
+```c#
+        [HttpGet("notfound")]
+        public ActionResult GetNotFoundRequest()
+        {
+            var thing = _context.Products.Find(42);
+            if (thing == null)
+            {
+                return NotFound(new ApiResponse(404));
+            }
+            return Ok();
+        }
+```
+ 4. In `Controllers` create new `ErrorController.cs` class
+```c#
+using API.Errors;
+using Microsoft.AspNetCore.Mvc;
+
+namespace API.Controllers
+{
+    [Microsoft.AspNetCore.Components.Route("errors/{code}")]
+    public class ErrorController : BaseApiController
+    {
+        public IActionResult Error(int code)
+        {
+            return new ObjectResult(new ApiResponse(code));
+        }
+    }
+}
+```
+ 5. Added following line in `Configure()` method inside`Startup.cs` class
+```c#
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            if (env.IsDevelopment()) app.UseDeveloperExceptionPage();
+            //Added following line
+            app.UseStatusCodePagesWithReExecute("/errors/{0}");
+            //-------------------------------------------------
+            app.UseHttpsRedirection();
+
+            app.UseRouting();
+
+            app.UseStaticFiles();
+            
+            app.UseAuthorization();
+
+            app.UseEndpoints(endpoints => { endpoints.MapControllers(); });
+        }
+```
+ 6. Now if we hit endpoint that doesn't exist from the browser eg. https://localhost:5001/api/endpointthatdoesnotexist we get a response:
+```json
+{
+    "statusCode": 404,
+    "message": "Resource not found"
+}
+```
+### 4.2. Creating Exception handler middleware
+ 1. In `Errors` folder create a new class `ApiException`
+ ```c#
+ namespace API.Errors
+{
+    public class ApiException:ApiResponse
+    {
+        public ApiException(int statusCode, string message = null,string details=null) : base(statusCode, message)
+        {
+            Details = details;
+        }
+
+        public string Details { get; set; }
+    }
+}
+ ```
+ 2. Inside `API` folder create new folder `Middleware`
+ 3. Inside `Middleware` create `ExceptionMiddleware.cs` class
+```c#
+using System;
+using System.Net;
+using System.Text.Json;
+using System.Threading.Tasks;
+using API.Errors;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace API.Middleware
+{
+    public class ExceptionMiddleware
+    {
+        private readonly RequestDelegate _next;
+        private readonly ILogger<ExceptionMiddleware> _logger;
+        private readonly IHostEnvironment _env;
+
+        public ExceptionMiddleware(RequestDelegate next,ILogger<ExceptionMiddleware> logger,IHostEnvironment env)
+        {
+            _next = next;
+            _logger = logger;
+            _env = env;
+        }
+
+        public async Task InvokeAsync(HttpContext context)
+        {
+            try
+            {
+                await _next(context);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, ex.Message);
+                context.Response.ContentType = "application/json";
+                context.Response.StatusCode = (int) HttpStatusCode.InternalServerError;
+
+                var response = _env.IsDevelopment()
+                    ? new ApiException((int) HttpStatusCode.InternalServerError, ex.Message, ex.StackTrace.ToString())
+                    : new ApiException((int) HttpStatusCode.InternalServerError);
+
+                var options = new JsonSerializerOptions {PropertyNamingPolicy = JsonNamingPolicy.CamelCase};
+                var json = JsonSerializer.Serialize(response,options);
+                await context.Response.WriteAsync(json);
+            }
+        }
+    }
+}
+```
+ 3. Add `ExceptionMiddleware` in `Startup` config:
+
+ We replace:
+```c#
+if (env.IsDevelopment()) app.UseDeveloperExceptionPage();
+```
+with:
+```c#
+app.UseMiddleware<ExceptionMiddleware>();
+```
+ 4. Postman response with the https://localhost:5001/api/buggy/servererror url:
+```json
+{
+  "Details": "   at API.Controllers.BuggyController.GetServerError() in C:\\Users\\korisnik\\Desktop\\dev\\ecommerce-shop\\API\\Controllers\\BuggyController.cs:line 31\r\n   at lambda_method12(Closure , Object , Object[] )\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ActionMethodExecutor.SyncActionResultExecutor.Execute(IActionResultTypeMapper mapper, ObjectMethodExecutor executor, Object controller, Object[] arguments)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.InvokeActionMethodAsync()\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.Next(State& next, Scope& scope, Object& state, Boolean& isCompleted)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.InvokeNextActionFilterAsync()\r\n--- End of stack trace from previous location ---\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.Rethrow(ActionExecutedContextSealed context)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.Next(State& next, Scope& scope, Object& state, Boolean& isCompleted)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.InvokeInnerFilterAsync()\r\n--- End of stack trace from previous location ---\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeFilterPipelineAsync>g__Awaited|19_0(ResourceInvoker invoker, Task lastTask, State next, Scope scope, Object state, Boolean isCompleted)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeAsync>g__Awaited|17_0(ResourceInvoker invoker, Task task, IDisposable scope)\r\n   at Microsoft.AspNetCore.Routing.EndpointMiddleware.<Invoke>g__AwaitRequestTask|6_0(Endpoint endpoint, Task requestTask, ILogger logger)\r\n   at Microsoft.AspNetCore.Authorization.AuthorizationMiddleware.Invoke(HttpContext context)\r\n   at Microsoft.AspNetCore.Diagnostics.StatusCodePagesMiddleware.Invoke(HttpContext context)\r\n   at API.Middleware.ExceptionMiddleware.InvokeAsync(HttpContext context) in C:\\Users\\korisnik\\Desktop\\dev\\ecommerce-shop\\API\\Middleware\\ExceptionMiddleware.cs:line 29",
+  "StatusCode": 500,
+  "Message": "Object reference not set to an instance of an object."
+}
+```
+### 4.3. Improving validation error responses
+ 1. Inside `Errors` create a new class `ApiValidationErrorResponse.cs`
+```c#
+using System.Collections.Generic;
+
+namespace API.Errors
+{
+    public class ApiValidationErrorResponose : ApiResponse
+    {
+        public ApiValidationErrorResponose() : base(400)
+        {
+        }
+        
+        public IEnumerable<string> Errors { get; set; }
+    }
+}
+```
+ 2. In `Startup.cs` at the end of `public void ConfigureServices(IServiceCollection services)` add following lines:
+```c#
+services.Configure<ApiBehaviorOptions>(options =>
+            {
+                options.InvalidModelStateResponseFactory = actionContext =>
+                {
+                    var errors = actionContext.ModelState
+                        .Where(e => e.Value.Errors.Count > 0)
+                        .SelectMany(x => x.Value.Errors)
+                        .Select(x => x.ErrorMessage).ToArray();
+                   
+                    var errorResponse = new ApiValidationErrorResponose
+                    {
+                        Errors = errors
+                    };
+                    return new BadRequestObjectResult(errorResponse);
+                };
+            });
+```
+### 4.4. Adding Swagger for documenting API
+ 1. Install required packages if not installed already. See `API.sln` for more info.
+ 2. Add following lines in `Configure` and `ConfigureServices` methods in `Startup.cs` <br><br>
+
+At the end of `ConfigureServices()` add line:
+```c#
+services.AddSwaggerGen(c => { c.SwaggerDoc("v1", new OpenApiInfo {Title = "API", Version = "v1"}); });
+```
+ In `Configure()` add:
+```c#
+app.UseMiddleware<ExceptionMiddleware>();
+//After the line above add following lines - the ordering is important
+app.UseSwagger();
+
+app.UseSwaggerUI(c => { c.SwaggerEndpoint("v1/swagger.json", "API V1"); });
+```
+ 3. Added following line in `ErrorController.cs`
+```c#
+    [Route("errors/{code}")]
+ //-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+    [ApiExplorerSettings(IgnoreApi=true)]
+//-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+    public class ErrorController : BaseApiController{...}
+```
+ 4. Added following line in `GetProduct(int id)` method inside `ProductsController` so it returns an error page if we enter non-existing id of the product:
+```c#
+if (product == null) return NotFound(new ApiResponse(404));
+```
+5. We can add `ProduceResponseType` before property before for example `GetProduct(int id)` method to be able to see response types in swagger
+```c#
+[ProducesResponseType(StatusCodes.Status200OK)]
+[ProducesResponseType(typeof(ApiResponse),StatusCodes.Status404NotFound)]
+public async Task<ActionResult<ProductToReturnDto>> GetProduct(int id){...}
+```
