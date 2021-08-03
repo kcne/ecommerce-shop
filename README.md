@@ -1119,6 +1119,7 @@ if (product == null) return NotFound(new ApiResponse(404));
 [ProducesResponseType(typeof(ApiResponse),StatusCodes.Status404NotFound)]
 public async Task<ActionResult<ProductToReturnDto>> GetProduct(int id){...}
 ```
+<<<<<<< HEAD
 ### 5. API Paging,Filtering,Sorting & Searching
 #### 5.1. Adding sorting specification class
  
@@ -1417,3 +1418,128 @@ services.AddCors(opt =>
  ```c#
  app.UseCors("CorsPolicy");
  ```
+||||||| ea6ef4d
+=======
+### 4.4. Cleaning up `Startup.cs` file
+ 1. Create new directory `Extensions` in `API`
+ 2. Add new class `ApplicationServicesExtensions` in `Extensions` directory
+```c#
+using System.Linq;
+using API.Errors;
+using Core.Interfaces;
+using Infrastructure.Data;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace API.Extension
+{
+    public static class ApplicationServicesExtensions
+    {
+        public static IServiceCollection AddApplicationServices(this IServiceCollection services)
+        {
+            services.AddScoped<IProductRepository, ProductRepository>();
+            services.AddScoped(typeof(IGenericRepository<>), typeof(GenericRepository<>));
+            services.Configure<ApiBehaviorOptions>(options =>
+            {
+                options.InvalidModelStateResponseFactory = actionContext =>
+                {
+                    var errors = actionContext.ModelState
+                        .Where(e => e.Value.Errors.Count > 0)
+                        .SelectMany(x => x.Value.Errors)
+                        .Select(x => x.ErrorMessage).ToArray();
+
+                    var errorResponse = new ApiValidationErrorResponose
+                    {
+                        Errors = errors
+                    };
+                    return new BadRequestObjectResult(errorResponse);
+                };
+            });
+            return services;
+        }
+    }
+}
+```
+ 3. Inside `Extensions` create new class `SwaggerServicesExtensions`
+```c#
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.OpenApi.Models;
+
+namespace API.Extension
+{
+    public static class SwaggerServiceExtensions
+    {
+        public static IServiceCollection AddSwaggerDocumentation(this IServiceCollection services)
+        {
+            services.AddSwaggerGen(c => { c.SwaggerDoc("v1", new OpenApiInfo {Title = "API", Version = "v1"}); });
+            return services;
+        }
+
+        public static IApplicationBuilder UseSwaggerDocumentation(this IApplicationBuilder app)
+        {
+            app.UseSwagger();
+            app.UseSwaggerUI(c => { c.SwaggerEndpoint("v1/swagger.json", "API V1"); });
+            return app;
+        }
+    }
+    
+}
+```
+ 4. In `Startup.cs` delete lines copied to files above and use created method instead so now we cleaner `Startup.cs` file:
+```c#
+using API.Extension;
+using API.Helpers;
+using API.Middleware;
+using Infrastructure.Data;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace API
+{
+    public class Startup
+    {
+        private readonly IConfiguration _config;
+
+        public Startup(IConfiguration config)
+        {
+            _config = config;
+        }
+
+        // This method gets called by the runtime. Use this method to add services to the container.
+        public void ConfigureServices(IServiceCollection services)
+        {
+            services.AddAutoMapper(typeof(MappingProfiles));
+            services.AddControllers();
+            services.AddDbContext<StoreContext>(x =>
+                x.UseSqlite(_config.GetConnectionString("DefaultConnection")));
+            services.AddApplicationServices();
+            services.AddSwaggerDocumentation();
+        }
+
+        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+        {
+            app.UseMiddleware<ExceptionMiddleware>();
+
+            app.UseStatusCodePagesWithReExecute("/errors/{0}");
+
+            app.UseHttpsRedirection();
+
+            app.UseRouting();
+
+            app.UseStaticFiles();
+
+            app.UseAuthorization();
+
+            app.UseSwaggerDocumentation();
+
+            app.UseEndpoints(endpoints => { endpoints.MapControllers(); });
+        }
+    }
+}
+```
+ 5. github
