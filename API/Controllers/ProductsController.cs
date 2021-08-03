@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using API.Dtos;
 using API.Errors;
+using API.Helpers;
 using API.Specifications;
 using AutoMapper;
 using Core.Entities;
@@ -30,13 +31,16 @@ namespace API.Controllers
         [HttpGet]
         // This is where we return product list but until now without productType and productBrand properties.
         // In order to do so, instead of using var products = await _productsRepo.ListAllAsync(); code was refactored to following:
-        public async Task<ActionResult<IReadOnlyList<ProductToReturnDto>>> GetProducts()
+        public async Task<ActionResult<Pagination<ProductToReturnDto>>> GetProducts([FromQuery]ProductSpecParams productParams)
         {
-            // Create specification using ProductWithTypesAndBrandsSpec
-            var spec = new ProductsWithTypesAndBrandsSpecification();
-            // Use spec variable as argument in .ListAsync method
+            // Now takes brandID & TypeId properties;
+            var spec = new ProductsWithTypesAndBrandsSpecification(productParams);
+            var countSpec = new ProductWithFiltersForCountSpecification(productParams);
+            var totalItems = await _productsRepo.CountAsync(countSpec);
             var products = await _productsRepo.ListAsync(spec);
-            return Ok(_mapper.Map<IReadOnlyList<Product>, IReadOnlyList<ProductToReturnDto>>(products));
+            var data= _mapper.Map<IReadOnlyList<Product>, IReadOnlyList<ProductToReturnDto>>(products);
+            return Ok(new Pagination<ProductToReturnDto>(productParams.PageIndex, productParams.PageSize, totalItems,
+                data));
         }
 
         [HttpGet("{id}")]
