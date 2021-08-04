@@ -1119,6 +1119,307 @@ if (product == null) return NotFound(new ApiResponse(404));
 [ProducesResponseType(typeof(ApiResponse),StatusCodes.Status404NotFound)]
 public async Task<ActionResult<ProductToReturnDto>> GetProduct(int id){...}
 ```
+<<<<<<< HEAD
+### 5. API Paging,Filtering,Sorting & Searching
+#### 5.1. Adding sorting specification class
+ 
+1. Added new methods in `ISpecification.cs`
+```c#
+Expression<Func<T,object>> OrderBy { get; }
+Expression<Func<T,object>> OrderByDescending { get; }
+ ```
+2. Implemented following methods in `BaseSpecification.cs`
+```c#
+public Expression<Func<T, object>> OrderBy { get; private set; }
+public Expression<Func<T, object>> OrderByDescending { get; private set; }
+//order by expression
+protected void AddOrderBy(Expression<Func<T, object>> orderByExpression)
+{
+    OrderBy = orderByExpression;
+}
+//order by descending
+protected void AddOrderByDescending(Expression<Func<T, object>> orderByDescExpression)
+{
+    OrderByDescending = orderByDescExpression;
+}
+```
+3. Added new specification methods to query inside `getQuery()` method in `SpecificationEvaluator.cs` class:
+```c#
+//add Criteria to query expression
+//init
+if (spec.Criteria != null)
+{
+    query = query.Where(spec.Criteria); // ex. p=>p.ProductTypeId==id
+}
+//1. add OrderBy to query expression
+if (spec.OrderBy != null)
+{
+    query = query.OrderBy(spec.OrderBy); 
+}
+//2. add OrderByDesc to query expression
+if (spec.OrderByDescending != null)
+{
+    query = query.OrderByDescending(spec.OrderByDescending); 
+}
+```
+4. Updated `ProductsWithTypesAndBrandsSpecification` constructor to now take string `sort` as argument:
+```c#
+//defualt mode=sort by name
+ AddOrderBy(x=>x.Name);
+//according to sort prop
+if (!string.IsNullOrEmpty(sort))
+{
+    //sort by:
+    switch (sort)
+    {
+        // ascending price
+        case "priceAsc":
+            AddOrderBy(p=>p.Price);
+            break;
+        // descending price
+        case "priceDesc":
+            AddOrderByDescending(p=>p.Price);
+            break;
+        default:
+            // by name,default
+            AddOrderBy(n=>n.Name);
+            break;
+    }
+```
+5. In `Controllers` refactored `GetProducts(string sort)`
+```c#
+//now take string as argument(type of sorting that will be executed)
+public async Task<ActionResult<IReadOnlyList<ProductToReturnDto>>> GetProducts(string sort)
+{
+    // Create specification using ProductWithTypesAndBrandsSpec
+    var spec = new ProductsWithTypesAndBrandsSpecification(sort);
+    var products = await _productsRepo.ListAsync(spec);
+    return Ok(_mapper.Map<IReadOnlyList<Product>, IReadOnlyList<ProductToReturnDto>>(products));
+}
+```
+ 6. Now if we send a request to our localhost https://localhost:5001/api/products?sort=priceAsc we get an exception:
+```json
+{
+    "details": "...",
+    "statusCode": 500,
+    "message": "SQLite cannot order by expressions of type 'decimal'. Convert the values to a supported type or use LINQ to Objects to order the results."
+}
+```
+#### 5.2. Solving the decimal problem with SQlite
+ 1. Refactor `OnModelCreating(ModelBuilder modelBuilder)` method inside `StoreContext.cs` class
+```c#
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+{
+    base.OnModelCreating(modelBuilder);
+    modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+    // check if API is using Sqlite database
+    if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            //get all decimal values from database
+            var properties = entityType.ClrType.GetProperties().Where(p => p.PropertyType == typeof(decimal));
+
+            foreach (var property in properties)
+            {
+                // dealing with decimal prop
+                modelBuilder.Entity(entityType.Name).Property(property.Name).HasConversion<double>();
+            }
+        }
+    }
+}
+```
+#### 5.3. Adding filtering functionality 
+ 1. Modified `GetProducts()` method so it now takes two more optional arguments `typeId` & `brandId`
+```c#
+public async Task<ActionResult<IReadOnlyList<ProductToReturnDto>>> GetProducts(
+            string sort,int? brandId,int? typeId)
+```
+2. Modified  public `ProductsWithTypesAndBrandsSpecification.cs` class constructor
+```c#
+ public ProductsWithTypesAndBrandsSpecification(string sort,int? brandId,int? typeId) 
+  //added following:
+            : base(x=>(!brandId.HasValue || x.ProductBrandId == brandId) &&
+                   (!typeId.HasValue || x.ProductTypeId==typeId))
+```
+#### 5.4. Adding Pagination
+ 1. Added properties in `ISpecification.cs` interface
+```c#
+// We need following properties for our pagination mechanism
+// Take number of products
+int Take { get; }
+// Skip number of products
+int Skip { get; }
+// Pagination on/off
+bool IsPagingEnabled { get; }
+```
+ 2. Implemented new properties and added `ApplyPaging(int,int)` method
+```c#
+public int Take { get; private set; }
+public int Skip { get; private set; }
+public bool IsPagingEnabled { get; private set; }
+protected void ApplyPaging(int skip, int take)
+{
+    Skip = skip;
+    Take = take;
+    IsPagingEnabled = true;
+}
+```
+ 3. Configured `GetQuery()` method in `SpecificEvaluator` class
+```c#
+ // added following lines
+ // add paging
+if (spec.IsPagingEnabled)
+{
+    query = query.Skip(spec.Skip).Take(spec.Take);
+}
+```
+ 4. To clean up `GetProducts(string,int,int)` method and add constraints to page mechanism properties,<br>new class `ProductSpecParams.cs`  in `..\Core\Specifications\` is created:
+```c#
+namespace API.Specifications
+{
+    public class ProductSpecParams
+    {
+        private const int MaxPageSize = 50;
+        public int PageIndex { get; set; } = 1;
+        private int _pageSize = 6;
+
+        public int PageSize
+        {
+            get => _pageSize;
+            set => _pageSize = (value > MaxPageSize) ? MaxPageSize : value;
+        }
+        public int? BrandId { get; set; }
+        public int? TypeId { get; set; }
+        public string Sort { get; set; }
+    }
+}       
+```
+ 5. Now we can call `ProductSpecParams` object instead of arguments
+```c#
+public async Task<ActionResult<IReadOnlyList<ProductToReturnDto>>> GetProducts([FromQuery]ProductSpecParams productParams)
+        {
+            var spec = new ProductsWithTypesAndBrandsSpecification(productParams);
+            ...
+         }
+```
+ 6. Refactor `ProductWithTypesAndBrandSpecification.cs`(fix errors)
+ 7. Added paging to `ProductsWithTypesAndBrandsSpecification` constructor
+```c#
+AddInclude(x => x.ProductType);
+AddInclude(x => x.ProductBrand);
+AddOrderBy(x => x.Name);
+// Added paging
+ApplyPaging(productParams.PageSize*(productParams.PageIndex-1),productParams.PageSize);
+```
+ 8. Inside `Helpers` folder in `API` create a class `Pagination.cs`
+```c#
+using System.Collections.Generic;
+
+namespace API.Helpers
+{
+    public class Pagination<T> where T:class
+    {
+        public Pagination(int pageIndex, int pageSize, int count, IReadOnlyList<T> data)
+        {
+            PageIndex = pageIndex;
+            PageSize = pageSize;
+            Count = count;
+            Data = data;
+        }
+
+        public int PageIndex { get; set; }
+        public int PageSize { get; set; }
+        public int Count { get; set; }
+        public IReadOnlyList<T> Data { get; set; }
+    }
+}
+```
+ 9. In IGenericRepository added following method:
+```c#
+        Task<int> CountAsync(ISpecification<T> spec);
+```
+ 10. Implemented method in `GenericRepository.cs`
+```c#
+public async Task<int> CountAsync(ISpecification<T> spec)
+{
+    return await ApplySpecification(spec).CountAsync();
+}
+```
+ 11. In `Specification` dir create another new class `ProductWithFiltersCountSpecification.cs`
+```c#
+using Core.Entities;
+
+namespace API.Specifications
+{
+    public class ProductWithFiltersForCountSpecification:BaseSpecification<Product>
+    {
+        public ProductWithFiltersForCountSpecification(ProductSpecParams productParams): base(x => (!productParams.BrandId.HasValue || x.ProductBrandId == productParams.BrandId) &&
+            (!productParams.TypeId.HasValue || x.ProductTypeId == productParams.TypeId)) 
+        {
+            
+        }
+    }
+}
+```
+ 12. Modify `ProductController.cs`
+```c#
+        public async Task<ActionResult<Pagination<ProductToReturnDto>>> GetProducts([FromQuery]ProductSpecParams productParams)
+        {
+            // Now takes brandID & TypeId properties;
+            var spec = new ProductsWithTypesAndBrandsSpecification(productParams);
+            var countSpec = new ProductWithFiltersForCountSpecification(productParams);
+            var totalItems = await _productsRepo.CountAsync(spec);
+            var products = await _productsRepo.ListAsync(spec);
+            var data= _mapper.Map<IReadOnlyList<Product>, IReadOnlyList<ProductToReturnDto>>(products);
+            return Ok(new Pagination<ProductToReturnDto>(productParams.PageIndex, productParams.PageSize, totalItems,
+                data));
+        }
+```
+### 5.5 Adding the Search functionality 
+ 1. Added following _search field in `ProductSpecParams.cs`
+```c#
+private string _search;
+
+        public string Search
+        {
+            get=>_search;
+            set=>_search=value.ToLower();
+        }
+```
+ 2. Refactored the `ProductWithTypesAndBrandsConstructor`
+```c#
+public ProductsWithTypesAndBrandsSpecification(ProductSpecParams productParams)
+            : base(x =>
+                        (string.IsNullOrEmpty(productParams.Search) || x.Name.ToLower().Contains(productParams.Search))&& 
+                        (!productParams.BrandId.HasValue || x.ProductBrandId == productParams.BrandId) &&
+                        (!productParams.TypeId.HasValue || x.ProductTypeId == productParams.TypeId))
+```
+ 3. And also `ProductWithFiltersForCountSpecification`
+```c#
+        public ProductWithFiltersForCountSpecification(ProductSpecParams productParams) 
+            :base(x =>
+        (string.IsNullOrEmpty(productParams.Search) || x.Name.ToLower().Contains(productParams.Search))&& 
+        (!productParams.BrandId.HasValue || x.ProductBrandId == productParams.BrandId) &&
+        (!productParams.TypeId.HasValue || x.ProductTypeId == productParams.TypeId)) 
+```
+### 5.6. Adding CORS Support to the API
+ 1. In `ConfigureServices()` method inside `Startup.cs` add a new service
+```c#
+services.AddCors(opt =>
+{
+    opt.AddPolicy("CorsPolicy", policy =>
+    {
+        policy.AllowAnyHeader().AllowAnyMethod().WithOrigins("https://localhost:4200");
+    });
+});
+```
+ & to the `Configure()` method also
+ ```c#
+ app.UseCors("CorsPolicy");
+ ```
+||||||| ea6ef4d
+=======
 ### 4.4. Cleaning up `Startup.cs` file
  1. Create new directory `Extensions` in `API`
  2. Add new class `ApplicationServicesExtensions` in `Extensions` directory
@@ -1241,3 +1542,4 @@ namespace API
     }
 }
 ```
+ 5. github
