@@ -3,10 +3,12 @@ import { BrowserModule } from '@angular/platform-browser';
 
 import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
-import { BrowserAnimationsModule } from '@angular/platform-browser/animations';;
+import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
 import {HttpClient, HttpClientModule} from '@angular/common/http';
 import {CoreModule} from './core/core.module';
 import {ShopModule} from './shop/shop.module';
+import { HomeModule } from './home/home.module';
+import {ShopService} from "./shop/shop.service";
 
 @NgModule({
   declarations: [
@@ -18,7 +20,7 @@ import {ShopModule} from './shop/shop.module';
     BrowserAnimationsModule,
     HttpClientModule,
     CoreModule,
-    ShopModule
+    HomeModule,
   ],
   providers: [],
   bootstrap: [AppComponent]
