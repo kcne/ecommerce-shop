@@ -25,7 +25,7 @@
     "jquery": "^3.6.0",
     "ngx-bootstrap": "^7.0.0",
     "ngx-spinner": "^11.0.2",
-    "ngx-toastr": "^14.1.0",
+    "ngx-toastr": "^13.2.1",
     "popper.js": "^1.16.1",
     "rxjs": "~6.6.0",
     "tslib": "^2.0.0",
