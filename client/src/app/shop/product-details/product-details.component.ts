@@ -10,17 +10,19 @@ import {BreadcrumbService} from "xng-breadcrumb";
   styleUrls: ['./product-details.component.scss']
 })
 export class ProductDetailsComponent implements OnInit {
-  product:IProduct;
+  product: IProduct;
 
-  constructor(private shopService:ShopService, private activateRoute: ActivatedRoute, private bcService: BreadcrumbService) { }
+  constructor(private shopService: ShopService, private activateRoute: ActivatedRoute, private bcService: BreadcrumbService) {
+    this.bcService.set('@productDetails', ' ');
+  }
 
   ngOnInit(): void {
     this.loadProduct();
   }
   loadProduct() {
     this.shopService.getProduct(+this.activateRoute.snapshot.paramMap.get('id')).subscribe(product => {
-      this.product=product;
-      this.bcService.set('@productDetails',product.name);
+      this.product = product;
+      this.bcService.set('@productDetails', product.name);
     }, error => {
       console.log(error);
     });
