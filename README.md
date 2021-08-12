@@ -1418,9 +1418,7 @@ services.AddCors(opt =>
  ```c#
  app.UseCors("CorsPolicy");
  ```
-||||||| ea6ef4d
-=======
-### 4.4. Cleaning up `Startup.cs` file
+### 5.7. Cleaning up `Startup.cs` file
  1. Create new directory `Extensions` in `API`
  2. Add new class `ApplicationServicesExtensions` in `Extensions` directory
 ```c#
@@ -1542,4 +1540,173 @@ namespace API
     }
 }
 ```
+### 6. API - Basket
+#### 6.1. Setting up Redis
+ 1. Install `StackExchange.Redis` via NuGet package manager in Infrastructure project.
+ 2. Add it as a service in `ConfigurationServices(IServiceCollection services)` in `Startup.cs` class
+```c#
+  services.AddSingleton<IConnectionMultiplexer>(c =>
+            {
+                var configuration = ConfigurationOptions.Parse(_config.GetConnectionString("Redis"),
+                    true);
+                return ConnectionMultiplexer.Connect(configuration);
+            });
+```
+ 3. In `appsettings.Development.json` add a connection string 
+```c#
+ "ConnectionStrings": {
+    "DefaultConnection": "Data source=e-commerce.db",
+     "Redis": "localhost" //added connection string to use it locally
+  }
+```
+#### 6.2. Setting up a basket class
+ 1. In `Core/Entities` create a new class `BasketItem.cs`
+```c#
+namespace Core.Entities
+{
+    public class BasketItem
+    {
+        public int Id { get; set; }
+        public string ProductName { get; set; }
+        public decimal Price { get; set; }
+        public int Quantity { get; set; }
+        public string PictureUrl { get; set; }
+        public string Brand { get; set; }
+        public string Type { get; set; }
+    }
+}
+```
+ 2. In same directory create another class `CustomerBasket.cs`
+```c#
+using System.Collections.Generic;
 
+namespace Core.Entities
+{
+    public class CustomerBasket
+    {
+        public CustomerBasket(string id)
+        {
+            Id = id;
+        }
+
+        public CustomerBasket()
+        {
+        }
+
+        public string Id { get; set; }
+        public List<BasketItem> Items { get; set; } = new List<BasketItem>();
+
+    }
+}
+```
+#### 6.3. Creating a basket repository interface
+ 1. Inside `Core/Interfaces` created new interface `IBasketRepository.cs`
+```c#
+using System.Threading.Tasks;
+using Core.Entities;
+
+namespace Core.Interfaces
+{
+    public interface IBasketRepository
+    {
+        Task<CustomerBasket> GetBasketAsync(string basketId);
+        Task<CustomerBasket> UpdateBasketAsync(CustomerBasket basket);
+        Task<bool> DeleteBasketAsync(string basketId);
+    }
+}
+```
+ 2. Inside `Infrastructure/Data` created new class `BasketRepository.cs`
+ 3. Inside `ApplicationServicesExtensions.cs` add it as a service
+```c#
+ services.AddScoped<IBasketRepository, BasketRepository>();
+```
+#### 6.4. Implementing the basket repository
+```c#
+using System;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Core.Entities;
+using Core.Interfaces;
+using StackExchange.Redis;
+
+namespace Infrastructure.Data
+{
+    public class BasketRepository : IBasketRepository
+    {
+        private readonly IDatabase _database;
+        public BasketRepository(IConnectionMultiplexer redis)
+        {
+            _database = redis.GetDatabase();
+        }
+
+        public async Task<CustomerBasket> GetBasketAsync(string basketId)
+        {
+            var data = await _database.StringGetAsync(basketId);
+            return data.IsNullOrEmpty ? null : JsonSerializer.Deserialize<CustomerBasket>(data);
+        }
+
+        //update or create a basket
+        public async Task<CustomerBasket> UpdateBasketAsync(CustomerBasket basket)
+        {
+            var created = await _database.StringSetAsync(basket.Id, JsonSerializer.Serialize(basket), TimeSpan.FromDays(30));
+
+            if (!created) return null;
+
+            return await GetBasketAsync(basket.Id);
+        }
+
+        public async Task<bool> DeleteBasketAsync(string basketId)
+        {
+            return await _database.KeyDeleteAsync(basketId);
+        }
+    }
+}
+```
+### 6.5. Adding a basket controller
+ 1. In `API/Controllers` create a new c# class `BasketController.cs`
+```c#
+using System.Threading.Tasks;
+using Core.Entities;
+using Core.Interfaces;
+using Microsoft.AspNetCore.Mvc;
+
+namespace API.Controllers
+{
+    public class BasketController : BaseApiController
+    {
+        private readonly IBasketRepository _basketRepository;
+
+        public BasketController(IBasketRepository basketRepository)
+        {
+            _basketRepository = basketRepository;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<CustomerBasket>> GetBasketById(string id)
+        {
+            var basket = await _basketRepository.GetBasketAsync(id);
+            return Ok(basket ?? new CustomerBasket(id));
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<CustomerBasket>> UpdateBasket(CustomerBasket basket)
+        {
+            var updatedBasket = await _basketRepository.UpdateBasketAsync(basket);
+            return Ok(updatedBasket);
+        }
+
+        [HttpDelete]
+        public async Task DeleteBasketAsync(string id)
+        {
+            await _basketRepository.DeleteBasketAsync(id);
+        }
+    }
+}
+```
+### 6.6. Installing Redis with Docker
+ 1. Install docker on a development machine
+ 2. Add `docker-compose.yml` in main project directory
+ 3. Running the docker image 
+```
+docker-compose up --detach
+```
