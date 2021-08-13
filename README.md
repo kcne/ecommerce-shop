@@ -1710,3 +1710,533 @@ namespace API.Controllers
 ```
 docker-compose up --detach
 ```
+### 7. Identity
+#### 7.1. Setting up identity packages
+ 1. In Core project install `Microsoft.AspNetCore.Identity.EntityFrameworkCore` package via NuGet
+ 2. In Infrastructure project install `Microsoft.AspNetCore.Identity`, `Microsoft.IdentityModel.Tokens` and `System.IdentityModel.Tokens.Jwt` packages via NuGet
+#### 7.2. Setting up the identity classes
+ 1. In `Core/Entities` create a new directory `Identity`
+ 2. Inside `Identity` folder create a new class `AppUser.cs`
+```c#
+using System.Net.Sockets;
+using Microsoft.AspNetCore.Identity;
+
+namespace Core.Entities.Identity
+{
+    public class AppUser : IdentityUser
+    {
+        public string DisplayName { get; set; }
+        public Address Address { get; set; }
+    }
+}
+```
+3. In `Identity` folder create a class `Address.cs`
+```c#
+using System.ComponentModel.DataAnnotations;
+
+namespace Core.Entities.Identity
+{
+    public class Address
+    {
+        public int Id { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public string Street { get; set; }
+        public string City { get; set; }
+        public string State { get; set; }
+        public string ZipCode { get; set; }
+        
+        [Required]
+        public string AppUserId { get; set; }
+        public AppUser AppUser { get; set; }
+    }
+}
+```
+### 7.3. Adding the IdentityDbContext
+ 1. In Infrastructure folder create a new directory `Identity`
+ 2. Inside new created directory create a class `AppIdentityDbContext.cs`
+```c#
+using Core.Entities.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+
+namespace Infrastructure.Identity
+{
+    public class AppIdentityDbContext : IdentityDbContext<AppUser>
+    {
+        public AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options) : base(options)
+        {
+        }
+
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            base.OnModelCreating(builder);
+        }
+    }
+}
+```
+ 3. Add this as a service in `Startup.cs` 
+```c#
+services.AddDbContext<AppIdentityDbContext>(x =>
+{
+    x.UseSqlite(_config.GetConnectionString("IdentityConnection"));
+});
+```
+ 4. In `appsettings.Development.json` add a connection string
+```json
+ "ConnectionStrings": {
+    "DefaultConnection": "Data source=e-commerce.db",
+    "IdentityConnection": "Data source=identity.db", // <=
+     "Redis": "localhost"
+  }
+```
+### 7.4 Adding a new migration
+ 1. From terminal 
+```
+dotnet ef migrations add IdentityInitial -p Infrastructure -s API -c AppIdentityDbContext -o Identity/Migrations
+```
+ 2. Inside `Infrastructure/Identity` create a new class `AppIdentityDbContextSeed.cs`
+```c#
+using System.Linq;
+using System.Threading.Tasks;
+using Core.Entities.Identity;
+using Microsoft.AspNetCore.Identity;
+
+namespace Infrastructure.Identity
+{
+    public class AppIdentityDbContextSeed
+    {
+        public static async Task SeedUserAsync(UserManager<AppUser> userManager)
+        {
+            if (!userManager.Users.Any())
+            {
+                var user = new AppUser
+                {
+                    DisplayName = "Bob",
+                    Email = "bob@test.com",
+                    UserName = "bob@test.com",
+                    Address = new Address
+                    {
+                        FirstName = "Bob",
+                        LastName = "Bobbity",
+                        Street = "10 The Street",
+                        City = "New York",
+                        State = "NY",
+                        ZipCode = "90210"
+                    }
+                };
+
+                await userManager.CreateAsync(user, "Pa$$w0rd");
+            }
+        }
+    }
+}
+```
+#### 7.5. Adding the Startup services for identity
+ 1. Inside `API/Extensions` create new class `IdentityServiceExtensions.cs`
+```c#
+using Core.Entities.Identity;
+using Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace API.Extension
+{
+    public static class IdentityServiceExtensions
+    {
+        public static IServiceCollection AddIdentityServices(this IServiceCollection services)
+        {
+            var builder = services.AddIdentityCore<AppUser>();
+            builder = new IdentityBuilder(builder.UserType, builder.Services);
+            builder.AddEntityFrameworkStores<AppIdentityDbContext>();
+            builder.AddSignInManager<SignInManager<AppUser>>();
+
+            services.AddAuthentication();
+            return services;
+        }
+    }
+}
+```
+ 2. Add this to `Startup.cs`
+```c#
+services.AddIdentityServices();
+```
+#### 7.6. Adding identity program class
+ 1. Little configuring in `Program.cs` 
+```c#
+try
+{
+    var context = services.GetRequiredService<StoreContext>();
+    await context.Database.MigrateAsync();
+    await StoreContextSeed.SeedAsync(context,loggerFactory);
+    // identity config start
+    var userManager = services.GetRequiredService<UserManager<AppUser>>();
+    var identityContext = services.GetRequiredService<AppIdentityDbContext>();
+    await identityContext.Database.MigrateAsync();
+    await AppIdentityDbContextSeed.SeedUserAsync(userManager);
+    //identity config end
+}
+```
+#### 7.7. Adding an Account controller
+ 1. Inside `API/Dtos` create `UserDto.cs`
+    
+```c#
+namespace API.Dtos
+{
+    public class UserDto
+    {
+        public string Email { get; set; }
+        public string DisplayName { get; set; }
+        public string Token { get; set; }
+    }
+}
+```
+ 2. Inside `API/Dtos` create `LoginDto.cs`
+    
+```c#
+namespace API.Dtos
+{
+    public class LoginDto
+    {
+        public string Email { get; set; }
+        public string Password { get; set; }
+    }
+}
+```
+ 3. Inside `API/Controllers` create a new class `AccountController.cs`
+```c#
+using System.Threading.Tasks;
+using API.Dtos;
+using API.Errors;
+using Core.Entities.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+
+namespace API.Controllers
+{
+    public class AccountController: BaseApiController
+    {
+        private readonly UserManager<AppUser> _userManager;
+        private readonly SignInManager<AppUser> _signInManager;
+
+        public AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+        }
+
+        [HttpPost("login")]
+        public async Task<ActionResult<UserDto>> Login(LoginDto loginDto)
+        {
+            var user = await _userManager.FindByEmailAsync(loginDto.Email);
+
+            if (user == null) return Unauthorized(new ApiResponse(401));
+
+            var result = await _signInManager.CheckPasswordSignInAsync(user,loginDto.Password,false);
+
+            if (!result.Succeeded) return Unauthorized(new ApiResponse(401));
+
+            return new UserDto
+            {
+                Email = user.Email,
+                Token = "This will be a token",
+                DisplayName = user.DisplayName
+            };
+        }
+    }
+}
+```
+### 7.8 Registering a user
+ 
+ 1.  In `Dtos` create new class `RegisterDto.cs`
+```c#
+namespace API.Dtos
+{
+    public class RegisterDto
+    {
+        public string DisplayName { get; set; }
+        public string Email { get; set; }
+        public string Password { get; set; }
+    }
+}
+```
+ 2 . In `AccountController.cs` added following method
+```c#
+[HttpPost("register")]
+    public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
+    {
+        var user = new AppUser
+        {
+            DisplayName = registerDto.DisplayName,
+            Email = registerDto.Email,
+            UserName = registerDto.Email
+        };
+
+        var result = await _userManager.CreateAsync(user, registerDto.Password);
+
+        if (!result.Succeeded) return BadRequest(new ApiResponse(400));
+
+        return new UserDto
+        {
+            DisplayName = user.DisplayName,
+            Token = "This will be a toke",
+            Email = user.Email
+        };
+    }
+```
+### 7.9. Adding a token generation service
+ 1.  Inside `Core/Interfaces` create a new interface `ITokenService.cs`
+```c#
+using Core.Entities.Identity;
+
+namespace Core.Interfaces
+{
+    public interface ITokenService
+    {
+        string CreateToken(AppUser user);
+    }
+}
+```
+ 2. Inside `Infrastructure` create a new folder `Services`
+ 3. Inside `Services` directory make a new class `TokenService.cs`
+```c#
+using System;
+using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Core.Entities.Identity;
+using Core.Interfaces;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+
+namespace Infrastructure.Services
+{
+    public class TokenService : ITokenService
+    {
+        private readonly IConfiguration _config;
+        private readonly SymmetricSecurityKey _key;
+
+        public TokenService(IConfiguration config)
+        {
+            _config = config;
+            _key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Token:Key"]));
+        }
+
+        public string CreateToken(AppUser user)
+        {
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(ClaimTypes.GivenName, user.DisplayName)
+            };
+
+            var creds = new SigningCredentials(_key, SecurityAlgorithms.HmacSha512Signature);
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.Now.AddDays(7),
+                SigningCredentials = creds,
+                Issuer = _config["Token:Issuer"]
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
+        }
+    }
+}
+```
+ 4. In `IdentityServiceExtensions.cs` configure the `services.AddAuthentiocation` method and edited constructor parameters
+```c#
+// Constructor now takes IConfig config as argument too
+public static IServiceCollection AddIdentityServices(this IServiceCollection services, IConfiguration config)
+```
+```c#
+// authentication configuration
+services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["Token:Key"])),
+            ValidIssuer = config["Token:Issuer"],
+            ValidateIssuer = true,
+        };
+    });
+```
+ 5. In `Startup.cs` we now need to pass the config to AddIdentityServices method
+```c#
+services.AddIdentityServices(_config);
+```
+ 6. In `appsettings.Development.json` below `"ConnectionStrings:{}"` add a Token field
+```json
+  "Token": {
+    "Key": "super secret key",
+    "Issuer": "https://localhost:5001"
+  }
+```
+ 7. In `Startup.cs` just above the `app.UseAuthorization()` add Authentication:
+```c#
+            app.UseAuthentication();
+            
+            app.UseAuthorization(); // <=
+```
+#### 7.10. Testing the token
+ 1. In `ApplicationServiceExtensions.cs` add `TokenService`
+```c#
+services.AddScoped<ITokenService, ITokenService>();
+```
+ 2. In `AccountController.cs` refactored the constructor
+```c#
+        public AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager, ITokenService tokenService)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+            _tokenService = tokenService;
+        }
+```
+Now we can use our token service to generate tokens when we return `UserDto` objects
+```c#
+return new UserDto
+{
+    Email = user.Email,
+    Token = _tokenService.CreateToken(user),
+    DisplayName = user.DisplayName
+};
+```
+```c#
+return new UserDto
+{
+    DisplayName = user.DisplayName,
+    Token = _tokenService.CreateToken(user),
+    Email = user.Email
+};
+```
+3. In `BuggyController.cs` added following method 
+```c#
+[HttpGet("testauth")]
+[Authorize]
+public ActionResult<string> GetSecretText()
+{
+    return "secret stuff";
+        }
+```
+#### 7.11. Troubleshooting authorization issues
+ 1. After logging the requests sent via Postman its is clear that the problem was with Audience Validation method inside JwtBeaver. We can override configuration parameter to resolve this.
+```c#
+services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["Token:Key"])),
+            ValidIssuer = config["Token:Issuer"],
+            ValidateIssuer = true,
+            ValidateAudience = false, //turn audience validation off
+        };
+    });
+```
+### 7.12. Adding additional account methods to be able to read user address as well(right now returns null)
+ 1. In `Extensions` directory add `UserManagerExtensions`
+```c#
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+ 
+using Core.Entities.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+
+namespace API.Extension
+{
+    public static class UserManagerExtensions
+    {
+        public static async Task<AppUser> FindByEmailWithAddressAsync(this UserManager<AppUser> input, ClaimsPrincipal user)
+        {
+            var email = user.FindFirstValue(ClaimTypes.Email);
+            return await input.Users.Include(x => x.Address).SingleOrDefaultAsync(x => x.Email == email);
+        }
+
+        public static async Task<AppUser> FindEmailFromClaimsPrinciple(this UserManager<AppUser> input,
+            ClaimsPrincipal user)
+        {
+            var email = user?.Claims?.FirstOrDefault(x => x.Type == ClaimTypes.Email)?.Value;
+            return await input.Users.SingleOrDefaultAsync(x => x.Email == email);
+        }
+    }
+}
+
+```
+ 2. Refactor methods in `AccountController.cs`
+```c#
+[Authorize]
+[HttpGet]
+public async Task<ActionResult<UserDto>> GetCurrentUser()
+{
+    var user = await _userManager.FindByEmailFromClaimsPrinciple(User);
+    
+    return new UserDto
+    {
+        Email = user.Email,
+        Token = _tokenService.CreateToken(user),
+        DisplayName = user.DisplayName
+    };
+}
+```
+```C#
+[Authorize]
+[HttpGet("address")]
+public async Task<ActionResult<Address>> GetUserAddress()
+{
+    
+    var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(User);
+
+    return user.Address;
+        }
+```
+ 3. In `API/Dtos` create a new class `AdressDto.cs`
+```c#
+namespace API.Dtos
+{
+    public class AddressDto
+    {
+        public int Id { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public string Street { get; set; }
+        public string City { get; set; }
+        public string State { get; set; }
+        public string ZipCode { get; set; }
+    }
+}
+```
+ 4. In `API\Helpers` folder inside `MappingProfiles.cs` create a new mapping profile 
+```c#
+CreateMap<Address, AddressDto>().ReverseMap(); //.ReversMap() meeans it can work in reverse too
+```
+ 5. Now bring IMapper as argument in the constructor
+```c#
+        public AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager, ITokenService tokenService,IMapper mapper)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+            _tokenService = tokenService;
+            _mapper = mapper;
+        }
+```
+ 5. Refactoring `GetUserAddress()` method again
+```c#
+        [Authorize]
+        [HttpGet("address")]
+        public async Task<ActionResult<AddressDto>> GetUserAddress()
+        {
+            
+            var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(User);
+
+            return _mapper.Map<Address, AddressDto>(user.Address);
+        }
+```
+ 6. Add a new method 
