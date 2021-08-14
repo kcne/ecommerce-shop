@@ -2239,4 +2239,252 @@ CreateMap<Address, AddressDto>().ReverseMap(); //.ReversMap() meeans it can work
             return _mapper.Map<Address, AddressDto>(user.Address);
         }
 ```
- 6. Add a new method 
+ 6. Add a new method `UpdateUserAddress()`
+```c#
+[Authorize]
+[HttpPut("address")]
+public async Task<ActionResult<AddressDto>> UpdateUserAddress(AddressDto address)
+{
+    var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(User);
+    user.Address = _mapper.Map<AddressDto, Address>(address);
+
+    var result = await _userManager.UpdateAsync(user);
+
+    if (result.Succeeded) return Ok(_mapper.Map<Address, AddressDto>(user.Address));
+
+    return BadRequest("Problem updating then user");
+
+}
+```
+### 8. API - Validation
+#### 8.1. Model validation
+ 1. To set the constraint to the address object so it does not accept null values we go to `AddressDto.cs` and set `[Required]` property on all properties
+```c#
+using System.ComponentModel.DataAnnotations;
+
+namespace API.Dtos
+{
+    public class AddressDto
+    {
+        [Required]
+        public int Id { get; set; }
+        [Required]
+        public string FirstName { get; set; }
+        [Required]
+        public string LastName { get; set; }
+        [Required]
+        public string Street { get; set; }
+        [Required]
+        public string City { get; set; }
+        [Required]
+        public string State { get; set; }
+        [Required]
+        public string ZipCode { get; set; }
+    }
+}
+```
+ 2. Now if we send a request to update address with null values to our API we get the response:
+```json
+{
+    "errors": [
+        "The City field is required.",
+        "The State field is required.",
+        "The Street field is required.",
+        "The ZipCode field is required."
+    ],
+    "statusCode": 400,
+    "message": "You have made a bad request"
+}
+```
+#### 8.2. Checking for duplicate email addresses
+ 1. If we send a Http POST request to register a user with empty password field we get a response:
+```json
+{
+    "statusCode": 400,
+    "message": "You have made a bad request"
+}
+```
+ 2. To be able to handle error better and give more details we add constraints to `RegisterDto.cs` class as well:
+```c#
+using System.ComponentModel.DataAnnotations;
+
+namespace API.Dtos
+{
+    public class RegisterDto
+    {
+        [Required]
+        public string DisplayName { get; set; }
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; }
+        [Required]
+        [RegularExpression("(?=^.{6,10}$)(?=.*\\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&amp;*()_+}{&quot;:;'?/&gt;.&lt;,])(?!.*\\s).*$")]
+        public string Password { get; set; }
+    }
+}
+```
+ 3. Now we can handle the case where email address already exists from our `AccountController.cs`. In the beginning of `Register` method we add:
+```c#
+    public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
+    {
+        if (CheckEmailExistsAsync(registerDto.Email).Result.Value)
+        {
+            return new BadRequestObjectResult(new ApiValidationErrorResponose
+            {
+                Errors = new[] {"Email address already in use"}
+            });
+        }
+    //... rest of the code continue executing from here
+    }
+```
+ 4. Now our error responses look like this:</br></br>For emtpy email and password fields we sent a request:
+```json
+{
+  "firstName": "Tom",
+  "lastName": "Smith"
+}
+```
+</br>We get a response:
+```json
+{
+    "errors": [
+        "The Email field is not a valid e-mail address.",
+        "The Password field is required."
+    ],
+    "statusCode": 400,
+    "message": "You have made a bad request"
+}
+```
+</br>Bad Email Address:
+```json
+{
+  "displayName": "D",
+  "email": "notanemail",
+  "password": "pa$$w0rD"
+}
+```
+</br>We get a response:
+```json
+{
+  "errors": [
+    "The Email field is not a valid e-mail address."
+  ],
+  "statusCode": 400,
+  "message": "You have made a bad request"
+}
+```
+</br>And for a weak password:
+```json
+{
+	"displayName": "Q",
+	"email": "notanemail@gmail.com",
+	"password": "123456"
+}
+```
+</br>We get a response:
+```json
+{
+    "errors": [
+        "Password must have 1 uppercase, 1 lowercase, 1 number, 1 non alphanumeric and at least 6 characters"
+    ],
+    "statusCode": 400,
+    "message": "You have made a bad request"
+}
+```
+#### 8.3. Validating a basket
+ 1. Create a new Dto class in `API/Dtos` - `CustomerBasketDto.cs`
+```c#
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+
+namespace API.Dtos
+{
+    public class CustomerBasketDto
+    {
+        [Required] public string Id { get; set; }
+        public List<BasketItemDto> Items { get; set; }
+    }
+}
+```
+ 2. Create a `BasketItemDto.cs` in `Dtos`
+```c#
+using System.ComponentModel.DataAnnotations;
+
+namespace API.Dtos
+{
+    public class BasketItemDto
+    {
+        [Required] public int Id { get; set; }
+        [Required] public string ProductName { get; set; }
+
+        [Required]
+        [Range(0.1, double.MaxValue, ErrorMessage = "Price must be greater than zero")]
+        public decimal Price { get; set; }
+
+        [Required]
+        [Range(1, int.MaxValue, ErrorMessage = "Quantity must be at least 1")]
+        public int Quantity { get; set; }
+
+        [Required] public string PictureUrl { get; set; }
+        [Required] public string Brand { get; set; }
+        [Required] public string Type { get; set; }
+    }
+}
+}
+```
+ 3. In mapping profiles we add two additional mapping profiles:
+```c#
+CreateMap<CustomerBasketDto, CustomerBasket>();
+CreateMap<BasketItemDto, BasketItem>();
+```
+ 4. Refactor `BasketController.cs` </br> Inject IMapper
+```c#
+        private readonly IBasketRepository _basketRepository;
+        private readonly IMapper _mapper; // initialzed field from the parametr
+
+        public BasketController(IBasketRepository basketRepository, IMapper mapper)
+        {
+            _basketRepository = basketRepository;
+            _mapper = mapper;
+        }
+```
+ Refactor `UpdateBasket` method:
+```c#
+        [HttpPost]
+        public async Task<ActionResult<CustomerBasket>> UpdateBasket(CustomerBasketDto basket)
+        {
+            var customerBasket = _mapper.Map<CustomerBasketDto, CustomerBasket>(basket);
+            var updatedBasket = await _basketRepository.UpdateBasketAsync(customerBasket);
+            return Ok(updatedBasket);
+        }
+```
+#### 8.4. Updating swagger config for identity
+ 1. We go to `SwaggerServiceExtensions.cs`
+```c#
+        public static IServiceCollection AddSwaggerDocumentation(this IServiceCollection services)
+        {
+            services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new OpenApiInfo {Title = "API", Version = "v1"});
+                //add securitySchema
+                var securitySchema = new OpenApiSecurityScheme
+                {
+                    Description = "JWT Auth Bearer Scheme",
+                    Name = "Authorization",
+                    In = ParameterLocation.Header,
+                    Type = SecuritySchemeType.Http,
+                    Scheme = "bearer",
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.SecurityScheme,
+                        Id = "Bearer"
+                    }
+                };
+                //config
+                c.AddSecurityDefinition("Bearer",securitySchema);
+                var securityRequirement = new OpenApiSecurityRequirement {{securitySchema, new[] {"Bearer"}}};
+                c.AddSecurityRequirement(securityRequirement);
+            });
+            return services;
+        }
+```
