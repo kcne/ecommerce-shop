@@ -4,7 +4,7 @@ Goal: To track progress I embedded all of the development process(code edits, fi
 ### Stack: .NET 5.0, Angular 11 and SQLite.
 ### Enviroment: Windows 10
 ### Date Created: 30.7.2021.
-### Last Edit: 11.8.2021 22:35
+### Last Edit: 19.8.2021.
 ### Contributors: Emin Kočan
 # API:
 ## 1. API Basics:
