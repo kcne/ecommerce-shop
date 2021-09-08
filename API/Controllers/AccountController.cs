@@ -28,12 +28,11 @@ namespace API.Controllers
             _tokenService = tokenService;
             _mapper = mapper;
         }
-
         [Authorize]
         [HttpGet]
         public async Task<ActionResult<UserDto>> GetCurrentUser()
         {
-            var user = await _userManager.FindByEmailFromClaimsPrinciple(User);
+            var user = await _userManager.FindByEmailFromClaimsPrinciple(HttpContext.User);
             
             return new UserDto
             {
@@ -54,7 +53,7 @@ namespace API.Controllers
         public async Task<ActionResult<AddressDto>> GetUserAddress()
         {
             
-            var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(User);
+            var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(HttpContext.User);
 
             return _mapper.Map<Address, AddressDto>(user.Address);
         }
@@ -63,7 +62,7 @@ namespace API.Controllers
         [HttpPut("address")]
         public async Task<ActionResult<AddressDto>> UpdateUserAddress(AddressDto address)
         {
-            var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(User);
+            var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(HttpContext.User);
             user.Address = _mapper.Map<AddressDto, Address>(address);
 
             var result = await _userManager.UpdateAsync(user);
@@ -92,7 +91,6 @@ namespace API.Controllers
                 DisplayName = user.DisplayName
             };
         }
-
         [HttpPost("register")]
         public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
         {
