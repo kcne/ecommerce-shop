@@ -21,7 +21,7 @@ export class AccountService {
   loadCurrentUser(token: string) {
     if (token === null) {
       this.currentUserSource.next(null);
-      return;
+      return of(null);
     }
     let headers = new HttpHeaders();
     headers = headers.set('Authorization', `Bearer ${token}`);
