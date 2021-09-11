@@ -6,6 +6,7 @@
       <h5 class="text-warning ml-3 mt-4 mb-3">Sort</h5>
       <select class="custom-select mb-4" (change)="onSortSelected($event.target.value)">
         <option *ngFor="let sort of sortOptions"
+                [selected]="shopParams.sort === sort.value"
                 [value]="sort.value"
         >
           {{sort.name}}
@@ -59,6 +60,7 @@
       <app-pager
       [pageSize]="shopParams.pageSize"
       [totalCount]="totalCount"
+      [pageNumber]="shopParams.pageNumber"
       (pageChanged)="onPageChanged($event)"
       ></app-pager>
       </div>
