@@ -4,8 +4,8 @@ Goal: To track progress I embedded all of the development process(code edits, fi
 ### Stack: .NET 5.0, Angular 11 and SQLite.
 ### Enviroment: Windows 10
 ### Date Created: 30.7.2021.
-### Last Edit: 2.8.2021 00:15:
-### Contributors: Emin Kocan
+### Last Edit: 19.8.2021.
+### Contributors: Emin Kočan
 # API:
 ## 1. API Basics:
 ### 1.1. Made a Skeleton API
@@ -1418,9 +1418,7 @@ services.AddCors(opt =>
  ```c#
  app.UseCors("CorsPolicy");
  ```
-||||||| ea6ef4d
-=======
-### 4.4. Cleaning up `Startup.cs` file
+### 5.7. Cleaning up `Startup.cs` file
  1. Create new directory `Extensions` in `API`
  2. Add new class `ApplicationServicesExtensions` in `Extensions` directory
 ```c#
@@ -1542,4 +1540,1718 @@ namespace API
     }
 }
 ```
- 5. github
+### 6. API - Basket
+#### 6.1. Setting up Redis
+ 1. Install `StackExchange.Redis` via NuGet package manager in Infrastructure project.
+ 2. Add it as a service in `ConfigurationServices(IServiceCollection services)` in `Startup.cs` class
+```c#
+  services.AddSingleton<IConnectionMultiplexer>(c =>
+            {
+                var configuration = ConfigurationOptions.Parse(_config.GetConnectionString("Redis"),
+                    true);
+                return ConnectionMultiplexer.Connect(configuration);
+            });
+```
+ 3. In `appsettings.Development.json` add a connection string 
+```c#
+ "ConnectionStrings": {
+    "DefaultConnection": "Data source=e-commerce.db",
+     "Redis": "localhost" //added connection string to use it locally
+  }
+```
+#### 6.2. Setting up a basket class
+ 1. In `Core/Entities` create a new class `BasketItem.cs`
+```c#
+namespace Core.Entities
+{
+    public class BasketItem
+    {
+        public int Id { get; set; }
+        public string ProductName { get; set; }
+        public decimal Price { get; set; }
+        public int Quantity { get; set; }
+        public string PictureUrl { get; set; }
+        public string Brand { get; set; }
+        public string Type { get; set; }
+    }
+}
+```
+ 2. In same directory create another class `CustomerBasket.cs`
+```c#
+using System.Collections.Generic;
+
+namespace Core.Entities
+{
+    public class CustomerBasket
+    {
+        public CustomerBasket(string id)
+        {
+            Id = id;
+        }
+
+        public CustomerBasket()
+        {
+        }
+
+        public string Id { get; set; }
+        public List<BasketItem> Items { get; set; } = new List<BasketItem>();
+
+    }
+}
+```
+#### 6.3. Creating a basket repository interface
+ 1. Inside `Core/Interfaces` created new interface `IBasketRepository.cs`
+```c#
+using System.Threading.Tasks;
+using Core.Entities;
+
+namespace Core.Interfaces
+{
+    public interface IBasketRepository
+    {
+        Task<CustomerBasket> GetBasketAsync(string basketId);
+        Task<CustomerBasket> UpdateBasketAsync(CustomerBasket basket);
+        Task<bool> DeleteBasketAsync(string basketId);
+    }
+}
+```
+ 2. Inside `Infrastructure/Data` created new class `BasketRepository.cs`
+ 3. Inside `ApplicationServicesExtensions.cs` add it as a service
+```c#
+ services.AddScoped<IBasketRepository, BasketRepository>();
+```
+#### 6.4. Implementing the basket repository
+```c#
+using System;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Core.Entities;
+using Core.Interfaces;
+using StackExchange.Redis;
+
+namespace Infrastructure.Data
+{
+    public class BasketRepository : IBasketRepository
+    {
+        private readonly IDatabase _database;
+        public BasketRepository(IConnectionMultiplexer redis)
+        {
+            _database = redis.GetDatabase();
+        }
+
+        public async Task<CustomerBasket> GetBasketAsync(string basketId)
+        {
+            var data = await _database.StringGetAsync(basketId);
+            return data.IsNullOrEmpty ? null : JsonSerializer.Deserialize<CustomerBasket>(data);
+        }
+
+        //update or create a basket
+        public async Task<CustomerBasket> UpdateBasketAsync(CustomerBasket basket)
+        {
+            var created = await _database.StringSetAsync(basket.Id, JsonSerializer.Serialize(basket), TimeSpan.FromDays(30));
+
+            if (!created) return null;
+
+            return await GetBasketAsync(basket.Id);
+        }
+
+        public async Task<bool> DeleteBasketAsync(string basketId)
+        {
+            return await _database.KeyDeleteAsync(basketId);
+        }
+    }
+}
+```
+### 6.5. Adding a basket controller
+ 1. In `API/Controllers` create a new c# class `BasketController.cs`
+```c#
+using System.Threading.Tasks;
+using Core.Entities;
+using Core.Interfaces;
+using Microsoft.AspNetCore.Mvc;
+
+namespace API.Controllers
+{
+    public class BasketController : BaseApiController
+    {
+        private readonly IBasketRepository _basketRepository;
+
+        public BasketController(IBasketRepository basketRepository)
+        {
+            _basketRepository = basketRepository;
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<CustomerBasket>> GetBasketById(string id)
+        {
+            var basket = await _basketRepository.GetBasketAsync(id);
+            return Ok(basket ?? new CustomerBasket(id));
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<CustomerBasket>> UpdateBasket(CustomerBasket basket)
+        {
+            var updatedBasket = await _basketRepository.UpdateBasketAsync(basket);
+            return Ok(updatedBasket);
+        }
+
+        [HttpDelete]
+        public async Task DeleteBasketAsync(string id)
+        {
+            await _basketRepository.DeleteBasketAsync(id);
+        }
+    }
+}
+```
+### 6.6. Installing Redis with Docker
+ 1. Install docker on a development machine
+ 2. Add `docker-compose.yml` in main project directory
+ 3. Running the docker image 
+```
+docker-compose up --detach
+```
+### 7. Identity
+#### 7.1. Setting up identity packages
+ 1. In Core project install `Microsoft.AspNetCore.Identity.EntityFrameworkCore` package via NuGet
+ 2. In Infrastructure project install `Microsoft.AspNetCore.Identity`, `Microsoft.IdentityModel.Tokens` and `System.IdentityModel.Tokens.Jwt` packages via NuGet
+#### 7.2. Setting up the identity classes
+ 1. In `Core/Entities` create a new directory `Identity`
+ 2. Inside `Identity` folder create a new class `AppUser.cs`
+```c#
+using System.Net.Sockets;
+using Microsoft.AspNetCore.Identity;
+
+namespace Core.Entities.Identity
+{
+    public class AppUser : IdentityUser
+    {
+        public string DisplayName { get; set; }
+        public Address Address { get; set; }
+    }
+}
+```
+3. In `Identity` folder create a class `Address.cs`
+```c#
+using System.ComponentModel.DataAnnotations;
+
+namespace Core.Entities.Identity
+{
+    public class Address
+    {
+        public int Id { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public string Street { get; set; }
+        public string City { get; set; }
+        public string State { get; set; }
+        public string ZipCode { get; set; }
+        
+        [Required]
+        public string AppUserId { get; set; }
+        public AppUser AppUser { get; set; }
+    }
+}
+```
+### 7.3. Adding the IdentityDbContext
+ 1. In Infrastructure folder create a new directory `Identity`
+ 2. Inside new created directory create a class `AppIdentityDbContext.cs`
+```c#
+using Core.Entities.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
+
+namespace Infrastructure.Identity
+{
+    public class AppIdentityDbContext : IdentityDbContext<AppUser>
+    {
+        public AppIdentityDbContext(DbContextOptions<AppIdentityDbContext> options) : base(options)
+        {
+        }
+
+        protected override void OnModelCreating(ModelBuilder builder)
+        {
+            base.OnModelCreating(builder);
+        }
+    }
+}
+```
+ 3. Add this as a service in `Startup.cs` 
+```c#
+services.AddDbContext<AppIdentityDbContext>(x =>
+{
+    x.UseSqlite(_config.GetConnectionString("IdentityConnection"));
+});
+```
+ 4. In `appsettings.Development.json` add a connection string
+```json
+ "ConnectionStrings": {
+    "DefaultConnection": "Data source=e-commerce.db",
+    "IdentityConnection": "Data source=identity.db", // <=
+     "Redis": "localhost"
+  }
+```
+### 7.4 Adding a new migration
+ 1. From terminal 
+```
+dotnet ef migrations add IdentityInitial -p Infrastructure -s API -c AppIdentityDbContext -o Identity/Migrations
+```
+ 2. Inside `Infrastructure/Identity` create a new class `AppIdentityDbContextSeed.cs`
+```c#
+using System.Linq;
+using System.Threading.Tasks;
+using Core.Entities.Identity;
+using Microsoft.AspNetCore.Identity;
+
+namespace Infrastructure.Identity
+{
+    public class AppIdentityDbContextSeed
+    {
+        public static async Task SeedUserAsync(UserManager<AppUser> userManager)
+        {
+            if (!userManager.Users.Any())
+            {
+                var user = new AppUser
+                {
+                    DisplayName = "Bob",
+                    Email = "bob@test.com",
+                    UserName = "bob@test.com",
+                    Address = new Address
+                    {
+                        FirstName = "Bob",
+                        LastName = "Bobbity",
+                        Street = "10 The Street",
+                        City = "New York",
+                        State = "NY",
+                        ZipCode = "90210"
+                    }
+                };
+
+                await userManager.CreateAsync(user, "Pa$$w0rd");
+            }
+        }
+    }
+}
+```
+#### 7.5. Adding the Startup services for identity
+ 1. Inside `API/Extensions` create new class `IdentityServiceExtensions.cs`
+```c#
+using Core.Entities.Identity;
+using Infrastructure.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace API.Extension
+{
+    public static class IdentityServiceExtensions
+    {
+        public static IServiceCollection AddIdentityServices(this IServiceCollection services)
+        {
+            var builder = services.AddIdentityCore<AppUser>();
+            builder = new IdentityBuilder(builder.UserType, builder.Services);
+            builder.AddEntityFrameworkStores<AppIdentityDbContext>();
+            builder.AddSignInManager<SignInManager<AppUser>>();
+
+            services.AddAuthentication();
+            return services;
+        }
+    }
+}
+```
+ 2. Add this to `Startup.cs`
+```c#
+services.AddIdentityServices();
+```
+#### 7.6. Adding identity program class
+ 1. Little configuring in `Program.cs` 
+```c#
+try
+{
+    var context = services.GetRequiredService<StoreContext>();
+    await context.Database.MigrateAsync();
+    await StoreContextSeed.SeedAsync(context,loggerFactory);
+    // identity config start
+    var userManager = services.GetRequiredService<UserManager<AppUser>>();
+    var identityContext = services.GetRequiredService<AppIdentityDbContext>();
+    await identityContext.Database.MigrateAsync();
+    await AppIdentityDbContextSeed.SeedUserAsync(userManager);
+    //identity config end
+}
+```
+#### 7.7. Adding an Account controller
+ 1. Inside `API/Dtos` create `UserDto.cs`
+    
+```c#
+namespace API.Dtos
+{
+    public class UserDto
+    {
+        public string Email { get; set; }
+        public string DisplayName { get; set; }
+        public string Token { get; set; }
+    }
+}
+```
+ 2. Inside `API/Dtos` create `LoginDto.cs`
+    
+```c#
+namespace API.Dtos
+{
+    public class LoginDto
+    {
+        public string Email { get; set; }
+        public string Password { get; set; }
+    }
+}
+```
+ 3. Inside `API/Controllers` create a new class `AccountController.cs`
+```c#
+using System.Threading.Tasks;
+using API.Dtos;
+using API.Errors;
+using Core.Entities.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+
+namespace API.Controllers
+{
+    public class AccountController: BaseApiController
+    {
+        private readonly UserManager<AppUser> _userManager;
+        private readonly SignInManager<AppUser> _signInManager;
+
+        public AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+        }
+
+        [HttpPost("login")]
+        public async Task<ActionResult<UserDto>> Login(LoginDto loginDto)
+        {
+            var user = await _userManager.FindByEmailAsync(loginDto.Email);
+
+            if (user == null) return Unauthorized(new ApiResponse(401));
+
+            var result = await _signInManager.CheckPasswordSignInAsync(user,loginDto.Password,false);
+
+            if (!result.Succeeded) return Unauthorized(new ApiResponse(401));
+
+            return new UserDto
+            {
+                Email = user.Email,
+                Token = "This will be a token",
+                DisplayName = user.DisplayName
+            };
+        }
+    }
+}
+```
+### 7.8 Registering a user
+ 
+ 1.  In `Dtos` create new class `RegisterDto.cs`
+```c#
+namespace API.Dtos
+{
+    public class RegisterDto
+    {
+        public string DisplayName { get; set; }
+        public string Email { get; set; }
+        public string Password { get; set; }
+    }
+}
+```
+ 2 . In `AccountController.cs` added following method
+```c#
+[HttpPost("register")]
+    public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
+    {
+        var user = new AppUser
+        {
+            DisplayName = registerDto.DisplayName,
+            Email = registerDto.Email,
+            UserName = registerDto.Email
+        };
+
+        var result = await _userManager.CreateAsync(user, registerDto.Password);
+
+        if (!result.Succeeded) return BadRequest(new ApiResponse(400));
+
+        return new UserDto
+        {
+            DisplayName = user.DisplayName,
+            Token = "This will be a toke",
+            Email = user.Email
+        };
+    }
+```
+### 7.9. Adding a token generation service
+ 1.  Inside `Core/Interfaces` create a new interface `ITokenService.cs`
+```c#
+using Core.Entities.Identity;
+
+namespace Core.Interfaces
+{
+    public interface ITokenService
+    {
+        string CreateToken(AppUser user);
+    }
+}
+```
+ 2. Inside `Infrastructure` create a new folder `Services`
+ 3. Inside `Services` directory make a new class `TokenService.cs`
+```c#
+using System;
+using System.Collections.Generic;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Core.Entities.Identity;
+using Core.Interfaces;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+
+namespace Infrastructure.Services
+{
+    public class TokenService : ITokenService
+    {
+        private readonly IConfiguration _config;
+        private readonly SymmetricSecurityKey _key;
+
+        public TokenService(IConfiguration config)
+        {
+            _config = config;
+            _key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Token:Key"]));
+        }
+
+        public string CreateToken(AppUser user)
+        {
+            var claims = new List<Claim>
+            {
+                new Claim(ClaimTypes.Email, user.Email),
+                new Claim(ClaimTypes.GivenName, user.DisplayName)
+            };
+
+            var creds = new SigningCredentials(_key, SecurityAlgorithms.HmacSha512Signature);
+            var tokenDescriptor = new SecurityTokenDescriptor
+            {
+                Subject = new ClaimsIdentity(claims),
+                Expires = DateTime.Now.AddDays(7),
+                SigningCredentials = creds,
+                Issuer = _config["Token:Issuer"]
+            };
+
+            var tokenHandler = new JwtSecurityTokenHandler();
+            var token = tokenHandler.CreateToken(tokenDescriptor);
+            return tokenHandler.WriteToken(token);
+        }
+    }
+}
+```
+ 4. In `IdentityServiceExtensions.cs` configure the `services.AddAuthentiocation` method and edited constructor parameters
+```c#
+// Constructor now takes IConfig config as argument too
+public static IServiceCollection AddIdentityServices(this IServiceCollection services, IConfiguration config)
+```
+```c#
+// authentication configuration
+services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["Token:Key"])),
+            ValidIssuer = config["Token:Issuer"],
+            ValidateIssuer = true,
+        };
+    });
+```
+ 5. In `Startup.cs` we now need to pass the config to AddIdentityServices method
+```c#
+services.AddIdentityServices(_config);
+```
+ 6. In `appsettings.Development.json` below `"ConnectionStrings:{}"` add a Token field
+```json
+  "Token": {
+    "Key": "super secret key",
+    "Issuer": "https://localhost:5001"
+  }
+```
+ 7. In `Startup.cs` just above the `app.UseAuthorization()` add Authentication:
+```c#
+            app.UseAuthentication();
+            
+            app.UseAuthorization(); // <=
+```
+#### 7.10. Testing the token
+ 1. In `ApplicationServiceExtensions.cs` add `TokenService`
+```c#
+services.AddScoped<ITokenService, ITokenService>();
+```
+ 2. In `AccountController.cs` refactored the constructor
+```c#
+        public AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager, ITokenService tokenService)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+            _tokenService = tokenService;
+        }
+```
+Now we can use our token service to generate tokens when we return `UserDto` objects
+```c#
+return new UserDto
+{
+    Email = user.Email,
+    Token = _tokenService.CreateToken(user),
+    DisplayName = user.DisplayName
+};
+```
+```c#
+return new UserDto
+{
+    DisplayName = user.DisplayName,
+    Token = _tokenService.CreateToken(user),
+    Email = user.Email
+};
+```
+3. In `BuggyController.cs` added following method 
+```c#
+[HttpGet("testauth")]
+[Authorize]
+public ActionResult<string> GetSecretText()
+{
+    return "secret stuff";
+        }
+```
+#### 7.11. Troubleshooting authorization issues
+ 1. After logging the requests sent via Postman its is clear that the problem was with Audience Validation method inside JwtBeaver. We can override configuration parameter to resolve this.
+```c#
+services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["Token:Key"])),
+            ValidIssuer = config["Token:Issuer"],
+            ValidateIssuer = true,
+            ValidateAudience = false, //turn audience validation off
+        };
+    });
+```
+### 7.12. Adding additional account methods to be able to read user address as well(right now returns null)
+ 1. In `Extensions` directory add `UserManagerExtensions`
+```c#
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+ 
+using Core.Entities.Identity;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+
+namespace API.Extension
+{
+    public static class UserManagerExtensions
+    {
+        public static async Task<AppUser> FindByEmailWithAddressAsync(this UserManager<AppUser> input, ClaimsPrincipal user)
+        {
+            var email = user.FindFirstValue(ClaimTypes.Email);
+            return await input.Users.Include(x => x.Address).SingleOrDefaultAsync(x => x.Email == email);
+        }
+
+        public static async Task<AppUser> FindEmailFromClaimsPrinciple(this UserManager<AppUser> input,
+            ClaimsPrincipal user)
+        {
+            var email = user?.Claims?.FirstOrDefault(x => x.Type == ClaimTypes.Email)?.Value;
+            return await input.Users.SingleOrDefaultAsync(x => x.Email == email);
+        }
+    }
+}
+
+```
+ 2. Refactor methods in `AccountController.cs`
+```c#
+[Authorize]
+[HttpGet]
+public async Task<ActionResult<UserDto>> GetCurrentUser()
+{
+    var user = await _userManager.FindByEmailFromClaimsPrinciple(User);
+    
+    return new UserDto
+    {
+        Email = user.Email,
+        Token = _tokenService.CreateToken(user),
+        DisplayName = user.DisplayName
+    };
+}
+```
+```C#
+[Authorize]
+[HttpGet("address")]
+public async Task<ActionResult<Address>> GetUserAddress()
+{
+    
+    var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(User);
+
+    return user.Address;
+        }
+```
+ 3. In `API/Dtos` create a new class `AdressDto.cs`
+```c#
+namespace API.Dtos
+{
+    public class AddressDto
+    {
+        public int Id { get; set; }
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public string Street { get; set; }
+        public string City { get; set; }
+        public string State { get; set; }
+        public string ZipCode { get; set; }
+    }
+}
+```
+ 4. In `API\Helpers` folder inside `MappingProfiles.cs` create a new mapping profile 
+```c#
+CreateMap<Address, AddressDto>().ReverseMap(); //.ReversMap() meeans it can work in reverse too
+```
+ 5. Now bring IMapper as argument in the constructor
+```c#
+        public AccountController(UserManager<AppUser> userManager, SignInManager<AppUser> signInManager, ITokenService tokenService,IMapper mapper)
+        {
+            _userManager = userManager;
+            _signInManager = signInManager;
+            _tokenService = tokenService;
+            _mapper = mapper;
+        }
+```
+ 5. Refactoring `GetUserAddress()` method again
+```c#
+        [Authorize]
+        [HttpGet("address")]
+        public async Task<ActionResult<AddressDto>> GetUserAddress()
+        {
+            
+            var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(User);
+
+            return _mapper.Map<Address, AddressDto>(user.Address);
+        }
+```
+ 6. Add a new method `UpdateUserAddress()`
+```c#
+[Authorize]
+[HttpPut("address")]
+public async Task<ActionResult<AddressDto>> UpdateUserAddress(AddressDto address)
+{
+    var user = await _userManager.FindUserByClaimsPrincipleWithAddressAsync(User);
+    user.Address = _mapper.Map<AddressDto, Address>(address);
+
+    var result = await _userManager.UpdateAsync(user);
+
+    if (result.Succeeded) return Ok(_mapper.Map<Address, AddressDto>(user.Address));
+
+    return BadRequest("Problem updating then user");
+
+}
+```
+### 8. API - Validation
+#### 8.1. Model validation
+ 1. To set the constraint to the address object so it does not accept null values we go to `AddressDto.cs` and set `[Required]` property on all properties
+```c#
+using System.ComponentModel.DataAnnotations;
+
+namespace API.Dtos
+{
+    public class AddressDto
+    {
+        [Required]
+        public int Id { get; set; }
+        [Required]
+        public string FirstName { get; set; }
+        [Required]
+        public string LastName { get; set; }
+        [Required]
+        public string Street { get; set; }
+        [Required]
+        public string City { get; set; }
+        [Required]
+        public string State { get; set; }
+        [Required]
+        public string ZipCode { get; set; }
+    }
+}
+```
+ 2. Now if we send a request to update address with null values to our API we get the response:
+```json
+{
+    "errors": [
+        "The City field is required.",
+        "The State field is required.",
+        "The Street field is required.",
+        "The ZipCode field is required."
+    ],
+    "statusCode": 400,
+    "message": "You have made a bad request"
+}
+```
+#### 8.2. Checking for duplicate email addresses
+ 1. If we send a Http POST request to register a user with empty password field we get a response:
+```json
+{
+    "statusCode": 400,
+    "message": "You have made a bad request"
+}
+```
+ 2. To be able to handle error better and give more details we add constraints to `RegisterDto.cs` class as well:
+```c#
+using System.ComponentModel.DataAnnotations;
+
+namespace API.Dtos
+{
+    public class RegisterDto
+    {
+        [Required]
+        public string DisplayName { get; set; }
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; }
+        [Required]
+        [RegularExpression("(?=^.{6,10}$)(?=.*\\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&amp;*()_+}{&quot;:;'?/&gt;.&lt;,])(?!.*\\s).*$")]
+        public string Password { get; set; }
+    }
+}
+```
+ 3. Now we can handle the case where email address already exists from our `AccountController.cs`. In the beginning of `Register` method we add:
+```c#
+    public async Task<ActionResult<UserDto>> Register(RegisterDto registerDto)
+    {
+        if (CheckEmailExistsAsync(registerDto.Email).Result.Value)
+        {
+            return new BadRequestObjectResult(new ApiValidationErrorResponose
+            {
+                Errors = new[] {"Email address already in use"}
+            });
+        }
+    //... rest of the code continue executing from here
+    }
+```
+ 4. Now our error responses look like this:</br></br>For emtpy email and password fields we sent a request:
+```json
+{
+  "firstName": "Tom",
+  "lastName": "Smith"
+}
+```
+</br>We get a response:
+```json
+{
+    "errors": [
+        "The Email field is not a valid e-mail address.",
+        "The Password field is required."
+    ],
+    "statusCode": 400,
+    "message": "You have made a bad request"
+}
+```
+</br>Bad Email Address:
+```json
+{
+  "displayName": "D",
+  "email": "notanemail",
+  "password": "pa$$w0rD"
+}
+```
+</br>We get a response:
+```json
+{
+  "errors": [
+    "The Email field is not a valid e-mail address."
+  ],
+  "statusCode": 400,
+  "message": "You have made a bad request"
+}
+```
+</br>And for a weak password:
+```json
+{
+	"displayName": "Q",
+	"email": "notanemail@gmail.com",
+	"password": "123456"
+}
+```
+</br>We get a response:
+```json
+{
+    "errors": [
+        "Password must have 1 uppercase, 1 lowercase, 1 number, 1 non alphanumeric and at least 6 characters"
+    ],
+    "statusCode": 400,
+    "message": "You have made a bad request"
+}
+```
+#### 8.3. Validating a basket
+ 1. Create a new Dto class in `API/Dtos` - `CustomerBasketDto.cs`
+```c#
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+
+namespace API.Dtos
+{
+    public class CustomerBasketDto
+    {
+        [Required] public string Id { get; set; }
+        public List<BasketItemDto> Items { get; set; }
+    }
+}
+```
+ 2. Create a `BasketItemDto.cs` in `Dtos`
+```c#
+using System.ComponentModel.DataAnnotations;
+
+namespace API.Dtos
+{
+    public class BasketItemDto
+    {
+        [Required] public int Id { get; set; }
+        [Required] public string ProductName { get; set; }
+
+        [Required]
+        [Range(0.1, double.MaxValue, ErrorMessage = "Price must be greater than zero")]
+        public decimal Price { get; set; }
+
+        [Required]
+        [Range(1, int.MaxValue, ErrorMessage = "Quantity must be at least 1")]
+        public int Quantity { get; set; }
+
+        [Required] public string PictureUrl { get; set; }
+        [Required] public string Brand { get; set; }
+        [Required] public string Type { get; set; }
+    }
+}
+}
+```
+ 3. In mapping profiles we add two additional mapping profiles:
+```c#
+CreateMap<CustomerBasketDto, CustomerBasket>();
+CreateMap<BasketItemDto, BasketItem>();
+```
+ 4. Refactor `BasketController.cs` </br> Inject IMapper
+```c#
+        private readonly IBasketRepository _basketRepository;
+        private readonly IMapper _mapper; // initialzed field from the parametr
+
+        public BasketController(IBasketRepository basketRepository, IMapper mapper)
+        {
+            _basketRepository = basketRepository;
+            _mapper = mapper;
+        }
+```
+ Refactor `UpdateBasket` method:
+```c#
+        [HttpPost]
+        public async Task<ActionResult<CustomerBasket>> UpdateBasket(CustomerBasketDto basket)
+        {
+            var customerBasket = _mapper.Map<CustomerBasketDto, CustomerBasket>(basket);
+            var updatedBasket = await _basketRepository.UpdateBasketAsync(customerBasket);
+            return Ok(updatedBasket);
+        }
+```
+#### 8.4. Updating swagger config for identity
+ 1. We go to `SwaggerServiceExtensions.cs`
+```c#
+        public static IServiceCollection AddSwaggerDocumentation(this IServiceCollection services)
+        {
+            services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new OpenApiInfo {Title = "API", Version = "v1"});
+                //add securitySchema
+                var securitySchema = new OpenApiSecurityScheme
+                {
+                    Description = "JWT Auth Bearer Scheme",
+                    Name = "Authorization",
+                    In = ParameterLocation.Header,
+                    Type = SecuritySchemeType.Http,
+                    Scheme = "bearer",
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.SecurityScheme,
+                        Id = "Bearer"
+                    }
+                };
+                //config
+                c.AddSecurityDefinition("Bearer",securitySchema);
+                var securityRequirement = new OpenApiSecurityRequirement {{securitySchema, new[] {"Bearer"}}};
+                c.AddSecurityRequirement(securityRequirement);
+            });
+            return services;
+        }
+```
+### 9. API - Orders
+#### 9.1. Creating the order aggregate
+ 1. In `Core/Entities` create new dir OrderAggregate
+ 2. In `OrderAggregate` dir create a new class `Address.cs`
+```c#
+namespace Core.Entities.OrderAggregate
+{
+    public class Address
+    {
+        public Address(string firstName, string lastName, string street, string city, string state, string zipCode)
+        {
+            FirstName = firstName;
+            LastName = lastName;
+            Street = street;
+            City = city;
+            State = state;
+            ZipCode = zipCode;
+        }
+
+        public Address()
+        {
+        }
+
+        public string FirstName { get; set; }
+        public string LastName { get; set; }
+        public string Street { get; set; }
+        public string City { get; set; }
+        public string State { get; set; }
+        public string ZipCode { get; set; }
+    }
+}
+```
+ 3. In same dir create another new class `DeliveryMethod.cs`
+```c#
+namespace Core.Entities.OrderAggregate
+{
+    public class DeliveryMethod: BaseEntity
+    {
+        public string ShortName { get; set; }
+        public string DeliveryTime { get; set; }
+        public string Description { get; set; }
+        public decimal Price { get; set; }
+    }
+}
+```
+ 4. In `Entities/OrderAggregate` create another class `ProductItemOrdered.cs`
+```c#
+namespace Core.Entities.OrderAggregate
+{
+    public class ProductItemOrdered
+    {
+        public ProductItemOrdered()
+        {
+        }
+
+        public ProductItemOrdered(int productItemId, string productName, string pictureUrl)
+        {
+            ProductItemId = productItemId;
+            ProductName = productName;
+            PictureUrl = pictureUrl;
+        }
+
+        public int ProductItemId { get; set; }
+        public string ProductName { get; set; }
+        public string PictureUrl { get; set; }
+    }
+}
+```
+ 5. Create new enum `OrderStatus.cs` in same dir 
+```c#
+using System.Runtime.Serialization;
+
+namespace Core.Entities.OrderAggregate
+{
+    public enum OrderStatus
+    {
+        [EnumMember(Value = "Pending")]
+        Pending,
+        [EnumMember(Value = "Payment Received")]
+        PaymentReceived,
+        [EnumMember(Value = "Payment Failed")]
+        PaymentFailed
+    }
+}
+```
+ 6. Create another new class `OrderItem.cs`
+```c#
+namespace Core.Entities.OrderAggregate
+{
+    public class OrderItem: BaseEntity
+    {
+        public OrderItem()
+        {
+        }
+
+        public OrderItem(ProductItemOrdered itemOrdered, decimal price, int quantity)
+        {
+            ItemOrdered = itemOrdered;
+            Price = price;
+            Quantity = quantity;
+        }
+
+        public ProductItemOrdered ItemOrdered { get; set; }
+        public decimal Price { get; set; }
+        public int Quantity { get; set; }
+    }
+}
+```
+ 7. Create another new class `Order.cs`
+```c#
+using System;
+using System.Collections.Generic;
+
+namespace Core.Entities.OrderAggregate
+{
+    public class Order: BaseEntity
+    {
+        public Order(IReadOnlyList<OrderItem> orderItems,string buyerEmail, Address shipToAddress, DeliveryMethod deliveryMethod,  decimal subtotal)
+        {
+            BuyerEmail = buyerEmail;
+            ShipToAddress = shipToAddress;
+            DeliveryMethod = deliveryMethod;
+            OrderItems = orderItems;
+            Subtotal = subtotal;
+        }
+
+        public Order()
+        {
+        }
+
+        public string BuyerEmail { get; set; }
+        public DateTimeOffset OrderDate { get; set; } = DateTimeOffset.Now;
+        public Address ShipToAddress { get; set; }
+        public DeliveryMethod DeliveryMethod { get; set; }
+        public IReadOnlyList<OrderItem> OrderItems { get; set; }
+        public decimal Subtotal { get; set; }
+        public OrderStatus Status { get; set; } = OrderStatus.Pending;
+        public string PaymentId { get; set; }
+
+        public decimal GetTotal()
+        {
+            return Subtotal + DeliveryMethod.Price;
+        }
+    }
+}
+```
+### 9.2. Configuring the order entities
+ 1. In `Infrastructure/Data/Config` create a new class `OrderConfiguration.cs`
+ ```c#
+ using System;
+using Core.Entities.OrderAggregate;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Infrastructure.Data.Config
+{
+    public class OrderConfiguration : IEntityTypeConfiguration<Order>
+    {
+        public void Configure(EntityTypeBuilder<Order> builder)
+        {
+            builder.OwnsOne(o => o.ShipToAddress, a => { a.WithOwner(); });
+            builder.Property(s => s.Status)
+                .HasConversion(
+                    o => o.ToString(),
+                    o => (OrderStatus) Enum.Parse(typeof(OrderStatus), o));
+            builder.HasMany(o => o.OrderItems).WithOne().OnDelete(DeleteBehavior.Cascade);
+        }
+    }
+}
+ ```
+ 2. In `Config` dir create another class `OrderItemConfiguration.cs`
+```c#
+using Core.Entities.OrderAggregate;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Infrastructure.Data.Config
+{
+    public class OrderItemConfiguration: IEntityTypeConfiguration<OrderItem>
+    {
+        public void Configure(EntityTypeBuilder<OrderItem> builder)
+        {
+            builder.OwnsOne(i => i.ItemOrdered, io => { io.WithOwner(); });
+            builder.Property(i => i.Price)
+                .HasColumnType("decimal(18,2)");
+        }
+    }
+}
+```
+ 3. In `Config` create another new config class `DeliveryMethodConfiguration.cs`
+```c#
+using Core.Entities.OrderAggregate;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace Infrastructure.Data.Config
+{
+    public class DeliveryMethodConfiguration : IEntityTypeConfiguration<DeliveryMethod>
+    {
+        public void Configure(EntityTypeBuilder<DeliveryMethod> builder)
+        {
+            builder.Property(d => d.Price)
+                .HasColumnType("decimal(18,2)");
+        }
+    }
+}
+```
+#### 9.3. Updating store context and seeding delivery methods
+ 1. Add new members to `StoreContext.cs` class
+```c#
+public DbSet<Order> Orders { get; set; }
+public DbSet<OrderItem> OrderItems { get; set; }
+public DbSet<DeliveryMethod> DeliveryMethods { get; set; }
+
+```
+ 2. In `StoreContextSeed.cs` updated `SeedAsync()` method to new seed data from `delivery.json` file too
+```c#
+// seed delivery.json data if not present in data context already
+if (!context.DeliveryMethods.Any())
+{
+    var dmData = File.ReadAllText("../Infrastructure/Data/SeedData/delivery.json");
+    var deliveryMethods = JsonSerializer.Deserialize<List<DeliveryMethod>>(dmData);
+    foreach (var item in deliveryMethods)
+    {
+        context.DeliveryMethods.Add(item);
+    }
+    await context.SaveChangesAsync();
+}
+} 
+```
+#### 9.4. Creating the order migration
+ 1. In terminal from solution folder we add new migration:
+```
+dotnet ef migrations add OrderEntityAdded -p Infrastructure -s API -c StoreContext
+```
+#### 9.5. Creating an order service
+ 1. In `Core/Interfaces` create a new interface `IOrderService.cs`
+```c#
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Core.Entities.OrderAggregate;
+
+namespace Core.Interfaces
+{
+    public interface IOrderService
+    {
+        Task<Order> CreateOrderAsync(string buyerEmail, int deliveryMethod, string basketId, Address shippingAddress);
+        Task<IReadOnlyList<Order>> GetOrdersForUserAsync(string buyerEmail);
+        Task<Order> GetOrderByIdAsync(int id, string buyerEmail);
+        Task<IReadOnlyList<DeliveryMethod>> GetDeliveryMethodsAsync();
+    }
+}
+```
+ 2. In `Infrastructure/Services` create a new class `OrderService.cs`
+```c#
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Core.Entities;
+using Core.Entities.OrderAggregate;
+using Core.Interfaces;
+
+namespace Infrastructure.Services
+{
+    public class OrderService : IOrderService
+    {
+        private readonly IGenericRepository<Order> _orderRepo;
+        private readonly IGenericRepository<DeliveryMethod> _dmRepo;
+        private readonly IGenericRepository<Product> _productRepo;
+        private readonly IBasketRepository _basketRepo;
+
+        public OrderService(IGenericRepository<Order> orderRepo, IGenericRepository<DeliveryMethod> dmRepo,
+            IGenericRepository<Product> productRepo, IBasketRepository basketRepo)
+        {
+            _orderRepo = orderRepo;
+            _dmRepo = dmRepo;
+            _productRepo = productRepo;
+            _basketRepo = basketRepo;
+        }
+
+        public async Task<Order> CreateOrderAsync(string buyerEmail, int deliveryMethodId, string basketId, Address shippingAddress)
+        {
+            // get basket from the repo
+            var basket = await _basketRepo.GetBasketAsync(basketId);
+            // get items from the product repo
+            var items = new List<OrderItem>();
+            foreach (var item in basket.Items)
+            {
+                var productItem = await _productRepo.GetByIdAsync(item.Id);
+                var itemOrdered = new ProductItemOrdered(productItem.Id, productItem.Name, productItem.PictureUrl);
+                var orderItem = new OrderItem(itemOrdered, productItem.Price, item.Quantity);
+                items.Add(orderItem);
+            }
+            // get delivery method from repo
+            var deliveryMethod = await _dmRepo.GetByIdAsync(deliveryMethodId);
+            // calc subtotal
+            var subtotal = items.Sum(item => item.Price * item.Quantity);
+            // create order
+            var order = new Order(items, buyerEmail, shippingAddress, deliveryMethod, subtotal);
+            // TODO: save to db
+            
+            // return order
+            return order;
+        }
+
+        public Task<IReadOnlyList<Order>> GetOrdersForUserAsync(string buyerEmail)
+        {
+            throw new System.NotImplementedException();
+        }
+
+        public Task<Order> GetOrderByIdAsync(int id, string buyerEmail)
+        {
+            throw new System.NotImplementedException();
+        }
+
+        public Task<IReadOnlyList<DeliveryMethod>> GetDeliveryMethodsAsync()
+        {
+            throw new System.NotImplementedException();
+        }
+    }
+}
+```
+ 3. In `ApplicationServicesExtensions.cs` add this as a service
+```c#
+services.AddScoped<IOrderService, OrderService>();
+```
+#### 9.5. Creating the order controller
+ 1. In `Api/Dtos` create a new class `OrderDto.cs`
+```c#
+namespace API.Dtos
+{
+    public class OrderDto
+    {
+        public string BasketId { get; set; }
+        public int DeliveryMethodId { get; set; }
+        public AddressDto ShipToAddress { get; set; }
+    }
+}
+```
+ 2. Added new mapping profiles in `MappingProfiles.cs`
+```c#
+            CreateMap<AddressDto, Core.Entities.OrderAggregate.Address>();
+```
+ 3. To extend claims method we create a new class `ClaimsPrincipleExtensions.cs` in `API/Extensions`
+```c#
+using System.Security.Claims;
+
+namespace API.Extension
+{
+    public static class ClaimPrincipalExtensions
+    {
+        public static string RetrieveEmailFromPrincipal(this ClaimsPrincipal user)
+        {
+            return user?.FindFirstValue(ClaimTypes.Email);
+        }
+    }
+}
+```
+ 4. In `API/Controllers` create a new class `OrdersController.cs`
+```c#
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using API.Dtos;
+using API.Errors;
+using API.Extension;
+using AutoMapper;
+using Core.Entities.OrderAggregate;
+using Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace API.Controllers
+{
+    [Authorize]
+    public class OrdersController: BaseApiController
+    {
+        private readonly IOrderService _orderService;
+        private readonly IMapper _mapper;
+
+        public OrdersController(IOrderService orderService,IMapper mapper)
+        {
+            _orderService = orderService;
+            _mapper = mapper;
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<Order>> CreateOrder(OrderDto orderDto)
+        {
+            var email = HttpContext.User.RetrieveEmailFromPrincipal();
+            var address = _mapper.Map<AddressDto, Address>(orderDto.ShipToAddress);
+            var order = await _orderService.CreateOrderAsync(email, orderDto.DeliveryMethodId,orderDto.BasketId,address);
+            if (order == null) return BadRequest(new ApiResponse(400,"Problem creating order"));
+            return Ok(order);
+        }
+    }
+}
+ ```
+#### 9.6. Implementing Unit Of Work Design Pattern
+ 1. In `Core/Interfaces` add new interface `IUnitOfWork.cs`
+```c#
+using System;
+using System.Threading.Tasks;
+using Core.Entities;
+
+namespace Core.Interfaces
+{
+    public interface IUnitOfWork : IDisposable
+    {
+        IGenericRepository<TEntity> Repository<TEntity>() where TEntity : BaseEntity;
+        Task<int> Complete();
+    }
+}
+```
+ 2. In `Infrastructure/Data` create a new class `UnitOfWork.cs`
+```c#
+using System;
+using System.Collections;
+using System.Threading.Tasks;
+using Core.Entities;
+using Core.Interfaces;
+
+namespace Infrastructure.Data
+{
+    public class UnitOfWork: IUnitOfWork
+    {
+        private readonly StoreContext _context;
+        private Hashtable _repositories;
+
+        public UnitOfWork(StoreContext context)
+        {
+            _context = context;
+        }
+
+        public void Dispose()
+        {
+            _context.Dispose();
+        }
+
+        public IGenericRepository<TEntity> Repository<TEntity>() where TEntity : BaseEntity
+        {
+            if (_repositories == null) _repositories = new Hashtable();
+
+            var type = typeof(TEntity).Name;
+
+            if (!_repositories.ContainsKey(type))
+            {
+                var repositoryType = typeof(GenericRepository<>);
+                var repositoryInstance = Activator.CreateInstance(repositoryType.MakeGenericType(typeof(TEntity)), _context);
+                _repositories.Add(type, repositoryInstance);
+            }
+
+            return (IGenericRepository<TEntity>) _repositories[type];
+        }
+
+        public async Task<int> Complete()
+        {
+            return await _context.SaveChangesAsync();
+        }
+    }
+}
+```
+ 3. In `ApplicationServiceExtensions.cs` add it as a service
+```c#
+services.AddScoped<IUnitOfWork, UnitOfWork>();
+```
+#### 9.7. Updating the generic repository
+ 1. In `IGenericRepository` added following method declarations
+```c#
+        void Add(T entity);
+        void Update(T entity);
+        void Delete(T entity);
+```
+ 2. We implement following methods in `GenericRepository.cs`
+```c#
+public void Add(T entity)
+{
+    _context.Set<T>().Add(entity);
+}
+
+public void Update(T entity)
+{
+    _context.Set<T>().Attach(entity);
+    _context.Entry(entity).State = EntityState.Modified;
+}
+
+public void Delete(T entity)
+{
+    _context.Set<T>().Remove(entity);
+}
+```
+ 3. We can now refactor `OrderServices.cs`
+```c#
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Core.Entities;
+using Core.Entities.OrderAggregate;
+using Core.Interfaces;
+
+namespace Infrastructure.Services
+{
+    public class OrderService : IOrderService
+    {
+        private readonly IBasketRepository _basketRepo;
+        private readonly IUnitOfWork _unitOfWork;
+
+        public OrderService(IBasketRepository basketRepo, IUnitOfWork unitOfWork)
+        {
+            _basketRepo = basketRepo;
+            _unitOfWork = unitOfWork;
+        }
+
+        public async Task<Order> CreateOrderAsync(string buyerEmail, int deliveryMethodId, string basketId, Address shippingAddress)
+        {
+            // get basket from the repo
+            var basket = await _basketRepo.GetBasketAsync(basketId);
+            // get items from the product repo
+            var items = new List<OrderItem>();
+            foreach (var item in basket.Items)
+            {
+                var productItem = await _unitOfWork.Repository<Product>().GetByIdAsync(item.Id);
+                var itemOrdered = new ProductItemOrdered(productItem.Id, productItem.Name, productItem.PictureUrl);
+                var orderItem = new OrderItem(itemOrdered, productItem.Price, item.Quantity);
+                items.Add(orderItem);
+            }
+            // get delivery method from repo
+            var deliveryMethod = await _unitOfWork.Repository<DeliveryMethod>().GetByIdAsync(deliveryMethodId);
+            // calc subtotal
+            var subtotal = items.Sum(item => item.Price * item.Quantity);
+            // create order
+            var order = new Order(items, buyerEmail, shippingAddress, deliveryMethod, subtotal);
+            _unitOfWork.Repository<Order>().Add(order);
+            // save to db
+            var result = await _unitOfWork.Complete();
+
+            if (result <= 0) return null;
+            
+            // delete basket
+            await _basketRepo.DeleteBasketAsync(basketId);
+            // return order
+            return order;
+        }
+
+        public Task<IReadOnlyList<Order>> GetOrdersForUserAsync(string buyerEmail)
+        {
+            throw new System.NotImplementedException();
+        }
+
+        public Task<Order> GetOrderByIdAsync(int id, string buyerEmail)
+        {
+            throw new System.NotImplementedException();
+        }
+
+        public Task<IReadOnlyList<DeliveryMethod>> GetDeliveryMethodsAsync()
+        {
+            throw new System.NotImplementedException();
+        }
+    }
+}
+```
+#### 9.8. Implementing the Order get methods
+
+ 1. Inside `Core/Specifications` create a new class `OrdersWithItemsAndOrderingSpecification.cs`
+```c#
+using Core.Entities.OrderAggregate;
+
+namespace API.Specifications
+{
+    public class OrdersWithItemsAndOrderingSpecification : BaseSpecification<Order>
+    {
+        public OrdersWithItemsAndOrderingSpecification(string email) : base(o =>o.BuyerEmail == email)
+        {
+            AddInclude(o=>o.OrderItems);
+            AddInclude(o=>o.DeliveryMethod);
+            AddOrderByDescending(o=>o.OrderDate);
+        }
+
+        public OrdersWithItemsAndOrderingSpecification(int id, string email) : 
+            base(o=>o.Id == id && o.BuyerEmail ==email)
+        {
+            AddInclude(o=>o.OrderItems);
+            AddInclude(o=>o.DeliveryMethod);
+        }
+        
+    }
+}
+```
+ 2. We can now implement the missing members in `OrderService.cs`
+```c#
+public async Task<IReadOnlyList<Order>> GetOrdersForUserAsync(string buyerEmail)
+{
+    var spec = new OrdersWithItemsAndOrderingSpecification(buyerEmail);
+    return await _unitOfWork.Repository<Order>().ListAsync(spec);
+}
+
+public async Task<Order> GetOrderByIdAsync(int id, string buyerEmail)
+{
+    var spec = new OrdersWithItemsAndOrderingSpecification(id, buyerEmail);
+    return await _unitOfWork.Repository<Order>().GetEntityWithSpec(spec);
+}
+
+public async Task<IReadOnlyList<DeliveryMethod>> GetDeliveryMethodsAsync()
+{
+    return await _unitOfWork.Repository<DeliveryMethod>().ListAllAsync();
+}
+```
+#### 9.9. Implementing order controller get methods
+ 1. In `OrderController.cs` we add following methods:
+```c#
+        [HttpGet]
+        public async Task<ActionResult<IReadOnlyList<Order>>> GetOrdersForUser()
+        {
+            var email = HttpContext.User.RetrieveEmailFromPrincipal();
+            var orders = await _orderService.GetOrdersForUserAsync(email);
+            return Ok(orders);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Order>> GetOrderByIdForUser(int id)
+        {
+            var email = HttpContext.User.RetrieveEmailFromPrincipal();
+            var order = await _orderService.GetOrderByIdAsync(id, email);
+            if (order == null) return NotFound(new ApiResponse(404));
+            return order;
+        }
+
+        [HttpGet("deliveryMethods")]
+        public async Task<ActionResult<IReadOnlyList<DeliveryMethod>>> GetDeliveryMethods()
+        {
+            return Ok(await _orderService.GetDeliveryMethodsAsync());
+        }
+```
+ 2. If we test `GetOrders()` method with postman and send request to api/orders endpoint we get an error:
+```json
+{
+    "details": "   at Microsoft.EntityFrameworkCore.Sqlite.Query.Internal.SqliteQueryableMethodTranslatingExpressionVisitor.TranslateOrderBy(ShapedQueryExpression source, LambdaExpression keySelector, Boolean ascending)\r\n   at Microsoft.EntityFrameworkCore.Query.QueryableMethodTranslatingExpressionVisitor.VisitMethodCall(MethodCallExpression methodCallExpression)\r\n   at System.Linq.Expressions.MethodCallExpression.Accept(ExpressionVisitor visitor)\r\n   at System.Linq.Expressions.ExpressionVisitor.Visit(Expression node)\r\n   at Microsoft.EntityFrameworkCore.Query.QueryableMethodTranslatingExpressionVisitor.VisitMethodCall(MethodCallExpression methodCallExpression)\r\n   at System.Linq.Expressions.MethodCallExpression.Accept(ExpressionVisitor visitor)\r\n   at System.Linq.Expressions.ExpressionVisitor.Visit(Expression node)\r\n   at Microsoft.EntityFrameworkCore.Query.QueryableMethodTranslatingExpressionVisitor.VisitMethodCall(MethodCallExpression methodCallExpression)\r\n   at System.Linq.Expressions.MethodCallExpression.Accept(ExpressionVisitor visitor)\r\n   at System.Linq.Expressions.ExpressionVisitor.Visit(Expression node)\r\n   at Microsoft.EntityFrameworkCore.Query.QueryCompilationContext.CreateQueryExecutor[TResult](Expression query)\r\n   at Microsoft.EntityFrameworkCore.Storage.Database.CompileQuery[TResult](Expression query, Boolean async)\r\n   at Microsoft.EntityFrameworkCore.Query.Internal.QueryCompiler.CompileQueryCore[TResult](IDatabase database, Expression query, IModel model, Boolean async)\r\n   at Microsoft.EntityFrameworkCore.Query.Internal.QueryCompiler.<>c__DisplayClass12_0`1.<ExecuteAsync>b__0()\r\n   at Microsoft.EntityFrameworkCore.Query.Internal.CompiledQueryCache.GetOrAddQuery[TResult](Object cacheKey, Func`1 compiler)\r\n   at Microsoft.EntityFrameworkCore.Query.Internal.QueryCompiler.ExecuteAsync[TResult](Expression query, CancellationToken cancellationToken)\r\n   at Microsoft.EntityFrameworkCore.Query.Internal.EntityQueryProvider.ExecuteAsync[TResult](Expression expression, CancellationToken cancellationToken)\r\n   at Microsoft.EntityFrameworkCore.Query.Internal.EntityQueryable`1.GetAsyncEnumerator(CancellationToken cancellationToken)\r\n   at Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.IncludableQueryable`2.GetAsyncEnumerator(CancellationToken cancellationToken)\r\n   at System.Runtime.CompilerServices.ConfiguredCancelableAsyncEnumerable`1.GetAsyncEnumerator()\r\n   at Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync[TSource](IQueryable`1 source, CancellationToken cancellationToken)\r\n   at Infrastructure.Data.GenericRepository`1.ListAsync(ISpecification`1 spec) in C:\\Users\\korisnik\\Desktop\\dev\\web\\ecommerce-shop\\Infrastructure\\Data\\GenericRepository.cs:line 37\r\n   at Infrastructure.Services.OrderService.GetOrdersForUserAsync(String buyerEmail) in C:\\Users\\korisnik\\Desktop\\dev\\web\\ecommerce-shop\\Infrastructure\\Services\\OrderService.cs:line 56\r\n   at API.Controllers.OrdersController.GetOrdersForUser() in C:\\Users\\korisnik\\Desktop\\dev\\web\\ecommerce-shop\\API\\Controllers\\OrdersController.cs:line 41\r\n   at lambda_method33(Closure , Object )\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ActionMethodExecutor.AwaitableObjectResultExecutor.Execute(IActionResultTypeMapper mapper, ObjectMethodExecutor executor, Object controller, Object[] arguments)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.<InvokeActionMethodAsync>g__Awaited|12_0(ControllerActionInvoker invoker, ValueTask`1 actionResultValueTask)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.<InvokeNextActionFilterAsync>g__Awaited|10_0(ControllerActionInvoker invoker, Task lastTask, State next, Scope scope, Object state, Boolean isCompleted)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.Rethrow(ActionExecutedContextSealed context)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.Next(State& next, Scope& scope, Object& state, Boolean& isCompleted)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ControllerActionInvoker.InvokeInnerFilterAsync()\r\n--- End of stack trace from previous location ---\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeFilterPipelineAsync>g__Awaited|19_0(ResourceInvoker invoker, Task lastTask, State next, Scope scope, Object state, Boolean isCompleted)\r\n   at Microsoft.AspNetCore.Mvc.Infrastructure.ResourceInvoker.<InvokeAsync>g__Awaited|17_0(ResourceInvoker invoker, Task task, IDisposable scope)\r\n   at Microsoft.AspNetCore.Routing.EndpointMiddleware.<Invoke>g__AwaitRequestTask|6_0(Endpoint endpoint, Task requestTask, ILogger logger)\r\n   at Swashbuckle.AspNetCore.SwaggerUI.SwaggerUIMiddleware.Invoke(HttpContext httpContext)\r\n   at Swashbuckle.AspNetCore.Swagger.SwaggerMiddleware.Invoke(HttpContext httpContext, ISwaggerProvider swaggerProvider)\r\n   at Microsoft.AspNetCore.Authorization.Policy.AuthorizationMiddlewareResultHandler.HandleAsync(RequestDelegate next, HttpContext context, AuthorizationPolicy policy, PolicyAuthorizationResult authorizeResult)\r\n   at Microsoft.AspNetCore.Authorization.AuthorizationMiddleware.Invoke(HttpContext context)\r\n   at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)\r\n   at Microsoft.AspNetCore.Diagnostics.StatusCodePagesMiddleware.Invoke(HttpContext context)\r\n   at API.Middleware.ExceptionMiddleware.InvokeAsync(HttpContext context) in C:\\Users\\korisnik\\Desktop\\dev\\web\\ecommerce-shop\\API\\Middleware\\ExceptionMiddleware.cs:line 29",
+    "statusCode": 500,
+    "message": "SQLite cannot order by expressions of type 'DateTimeOffset'. Convert the values to a supported type or use LINQ to Objects to order the results."
+}
+```
+ 3. To fix this we go to `OnModelCreating` method in `StoreContext.cs`
+```c#
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+{
+    base.OnModelCreating(modelBuilder);
+    modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+    // check if API is using Sqlite database
+    if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            //get all decimal values from database
+            var properties = entityType.ClrType.GetProperties().Where(p => p.PropertyType == typeof(decimal));
+
+            foreach (var property in properties)
+            {
+                // dealing with decimal property
+                modelBuilder.Entity(entityType.Name).Property(property.Name).HasConversion<double>();
+            }
+            // fix sql issue
+            var dateTimeProperties = entityType.ClrType.GetProperties()
+                .Where(p => p.PropertyType == typeof(DateTimeOffset));
+
+            foreach (var property in dateTimeProperties)
+            {
+                modelBuilder.Entity(entityType.Name).Property(property.Name)
+                    .HasConversion(new DateTimeOffsetToBinaryConverter());
+            }
+        }
+    }
+```
+#### 9.10. Shaping the order data
+ 1. Inside `API/Dtos` create a new class `OrderToReturnDto.cs`
+```c#
+using System;
+using System.Collections.Generic;
+using Core.Entities.OrderAggregate;
+
+namespace API.Dtos
+{
+    public class OrderToReturnDto
+    {
+        public int Id { get; set; }
+        public string BuyerEmail { get; set; }
+        public DateTimeOffset OrderDate { get; set; } = DateTimeOffset.Now;
+        public Address ShipToAddress { get; set; }
+        public string DeliveryMethod { get; set; }
+        public decimal ShippingPrice { get; set; }
+        public IReadOnlyList<OrderItem> OrderItems { get; set; }
+        public decimal Subtotal { get; set; }
+        public decimal Total { get; set; }
+        public string Status { get; set; }
+    }
+}
+```
+ 2. In the same directory we create another new dto class `OrderItemDto`
+```c#
+namespace API.Dtos
+{
+    public class OrderItemDto
+    {
+        public int ProductId { get; set; }
+        public string ProductName { get; set; }
+        public string PictureUrl { get; set; }
+        public decimal Price { get; set; }
+        public int Quantity { get; set; }
+    }
+}
+```
+ 3. Now in `MappingProfiles.cs` we add following profiles:
+```c#
+CreateMap<Order, OrderToReturnDto>();
+CreateMap<OrderItem, OrderItemDto>();
+```
+ 4. Now in `OrderController.cs` we refactor returning objects
+#### 9.11. Automapper config for orders we update our mappers:
+ 1. Go to `MappingProfiles.cs`
+```c#
+CreateMap<Order, OrderToReturnDto>()
+                .ForMember(d => d.DeliveryMethod, o => o.MapFrom(s => s.DeliveryMethod.ShortName))
+                .ForMember(d => d.ShippingPrice, o => o.MapFrom(s => s.DeliveryMethod.Price));
+CreateMap<OrderItem, OrderItemDto>()
+                .ForMember(d => d.ProductId, o => o.MapFrom(s => s.ItemOrdered.ProductItemId))
+                .ForMember(d => d.ProductName, o => o.MapFrom(s => s.ItemOrdered.ProductName))
+                .ForMember(d => d.PictureUrl, o => o.MapFrom(s => s.ItemOrdered.PictureUrl))
+```
+#### To include full URL of pictureUrl property we go to to `ProductUrlResolver.cs`
+ 1. Create a new class `OrderItemUrlResolver.cs` in `API/Helpers`
+```c#
+using API.Dtos;
+using AutoMapper;
+using AutoMapper.Configuration;
+using Core.Entities.OrderAggregate;
+using IConfiguration = Microsoft.Extensions.Configuration.IConfiguration;
+
+namespace API.Helpers
+{
+    public class OrderItemUrlResolver : IValueResolver<OrderItem,OrderItemDto,string>
+    {
+        private readonly IConfiguration _config;
+
+        public OrderItemUrlResolver(IConfiguration config)
+        {
+            _config = config;
+        }
+
+        public string Resolve(OrderItem source, OrderItemDto destination, string destMember, ResolutionContext context)
+        {
+            if (!string.IsNullOrEmpty(source.ItemOrdered.PictureUrl))
+            {
+                return _config["ApiUrl"] + source.ItemOrdered.PictureUrl;
+            }
+
+            return null;
+        }
+    }
+}
+```
+ 2. Now we need to include this in our mapping profiles
+```c#
+CreateMap<OrderItem, OrderItemDto>()
+                .ForMember(d => d.ProductId, o => o.MapFrom(s => s.ItemOrdered.ProductItemId))
+                .ForMember(d => d.ProductName, o => o.MapFrom(s => s.ItemOrdered.ProductName))
+                .ForMember(d => d.PictureUrl, o => o.MapFrom(s => s.ItemOrdered.PictureUrl))
+                .ForMember(d => d.PictureUrl, o => o.MapFrom<OrderItemUrlResolver>());
+```
