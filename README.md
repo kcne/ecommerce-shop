@@ -2,6 +2,8 @@
 
 This repository contains the source code for an online web store application built with .NET 5.0 as the backend framework and Angular 11 as the frontend framework. This application allows users to browse products, add them to their cart, and make purchases online.
 
+Note: All changes in building process are documented in `CHANGES.md` file. You can open file for more details on implementation.
+
 ## Getting Started
 
 These instructions will get you a copy of the project up and running on your local machine for development and testing purposes.
